@@ -7,13 +7,14 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/dustin/go-humanize"
 	"github.com/peekknuf/dataqa/internal/connectors"
+	"github.com/peekknuf/dataqa/internal/profiler" // Import the profiler package
 	"github.com/schollz/progressbar/v3"
 	"github.com/spf13/cobra"
 )
 
 var (
+	filename   string
 	dirPath    string
 	fileFormat string
 	recursive  bool
@@ -30,6 +31,39 @@ for quality metrics and statistics`,
 		if dirPath == "" {
 			log.Fatal("You must specify a directory with --dir")
 		}
+
+		// Check if a specific file is provided based on the -n flag
+		if filename != "" {
+			specificFile := filepath.Join(dirPath, filename)
+			if _, err := os.Stat(specificFile); os.IsNotExist(err) {
+				log.Fatalf("File not found: %s", specificFile)
+			}
+
+			// Process the specific file
+			profiler := profiler.NewCSVProfiler(specificFile)
+			if err := profiler.Profile(); err != nil {
+				log.Fatalf("Failed to profile %s: %v", specificFile, err)
+			}
+
+			// Calculate and display quality metrics
+			metrics := profiler.CalculateQuality()
+			fmt.Printf("\nFile: %s\n", specificFile)
+			fmt.Printf("- Rows: %d\n", profiler.RowCount)
+			fmt.Printf("- Null Percentage: %.2f%%\n", metrics.NullPercentage*100)
+			fmt.Printf("- Distinct Ratio: %.2f\n", metrics.DistinctRatio)
+
+			// Display column stats
+			for _, stats := range profiler.ColumnStats {
+				fmt.Printf("\nColumn: %s\n", stats.Name)
+				fmt.Printf("  Type: %s\n", stats.Type)
+				fmt.Printf("  Nulls: %d\n", stats.NullCount)
+				fmt.Printf("  Distinct: %d\n", stats.DistinctCount)
+				fmt.Printf("  Min: %s\n", stats.Min)
+				fmt.Printf("  Max: %s\n", stats.Max)
+			}
+			return
+		}
+
 		// Count total files/directories
 		totalItems := 0
 		filepath.WalkDir(dirPath, func(path string, d fs.DirEntry, err error) error {
@@ -40,7 +74,8 @@ for quality metrics and statistics`,
 			return nil
 		})
 
-		bar := progressbar.NewOptions(totalItems, // -1 = unknown total
+		// Initialize progress bar
+		bar := progressbar.NewOptions(totalItems,
 			progressbar.OptionSetWriter(os.Stderr),
 			progressbar.OptionEnableColorCodes(true),
 			progressbar.OptionSetDescription("[cyan][1/3][reset] Scanning files..."),
@@ -57,6 +92,7 @@ for quality metrics and statistics`,
 			}),
 		)
 
+		// Set up progress callback
 		options := connectors.DiscoveryOptions{
 			Recursive: recursive,
 			MinSize:   minSize,
@@ -67,27 +103,52 @@ for quality metrics and statistics`,
 			},
 		}
 
+		// Perform the scan
 		files, err := connectors.DiscoverFiles(dirPath, fileFormat, options)
 		if err != nil {
 			log.Fatalf("Scan failed: %v", err)
 		}
 
-		bar.Finish()
+		// Process each file with the profiler
+		for _, file := range files {
+			if file.IsDir {
+				continue // Skip directories
+			}
 
-		fmt.Printf("\nFound %d %s files:\n", len(files), fileFormat)
-		for _, f := range files {
-			fmt.Printf("- %s (%s, modified: %s)\n",
-				f.Path,
-				humanize.Bytes(uint64(f.Size)),
-				f.Modified.Format("2006-01-02 15:04:05"))
+			// Initialize and run the profiler
+			profiler := profiler.NewCSVProfiler(file.Path)
+			if err := profiler.Profile(); err != nil {
+				log.Printf("Failed to profile %s: %v", file.Path, err)
+				continue
+			}
+
+			// Calculate and display quality metrics
+			metrics := profiler.CalculateQuality()
+			fmt.Printf("\nFile: %s\n", file.Path)
+			fmt.Printf("- Rows: %d\n", profiler.RowCount)
+			fmt.Printf("- Null Percentage: %.2f%%\n", metrics.NullPercentage*100)
+			fmt.Printf("- Distinct Ratio: %.2f\n", metrics.DistinctRatio)
+
+			// Display column stats
+			for _, stats := range profiler.ColumnStats {
+				fmt.Printf("\nColumn: %s\n", stats.Name)
+				fmt.Printf("  Type: %s\n", stats.Type)
+				fmt.Printf("  Nulls: %d\n", stats.NullCount)
+				fmt.Printf("  Distinct: %d\n", stats.DistinctCount)
+				fmt.Printf("  Min: %s\n", stats.Min)
+				fmt.Printf("  Max: %s\n", stats.Max)
+			}
 		}
-		fmt.Println()
+
+		// Ensure the progress bar is complete
+		bar.Finish()
 	},
 }
 
 func init() {
 	rootCmd.AddCommand(scanCmd)
-
+	scanCmd.Flags().StringVarP(&filename, "file", "n", "",
+		"You might want to check specific file only")
 	scanCmd.Flags().StringVarP(&dirPath, "dir", "d", "",
 		"Directory to scan (required)")
 	scanCmd.Flags().StringVarP(&fileFormat, "format", "f", "csv",
