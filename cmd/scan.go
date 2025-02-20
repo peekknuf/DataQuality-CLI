@@ -12,6 +12,9 @@ import (
 var (
 	dirPath    string
 	fileFormat string
+	recursive  bool
+	minSize    int64
+	maxSize    int64
 )
 
 var scanCmd = &cobra.Command{
@@ -24,18 +27,25 @@ for quality metrics and statistics`,
 			log.Fatal("You must specify a directory with --dir")
 		}
 
-		files, err := connectors.DiscoverFiles(dirPath, fileFormat)
+		options := connectors.DiscoveryOptions{
+			Recursive: recursive,
+			MinSize:   minSize,
+			MaxSize:   maxSize,
+		}
+
+		files, err := connectors.DiscoverFiles(dirPath, fileFormat, options)
 		if err != nil {
 			log.Fatalf("Scan failed: %v", err)
 		}
 
 		fmt.Printf("\nFound %d %s files:\n", len(files), fileFormat)
 		for _, f := range files {
-			fmt.Printf("- %s (%s)\n",
+			fmt.Printf("- %s (%s, modified: %s)\n",
 				f.Path,
-				humanize.Bytes(uint64(f.Size)))
+				humanize.Bytes(uint64(f.Size)),
+				f.Modified.Format("2006-01-02 15:04:05"))
 		}
-		fmt.Println() // Add extra newline for better formatting
+		fmt.Println()
 	},
 }
 
@@ -46,7 +56,12 @@ func init() {
 		"Directory to scan (required)")
 	scanCmd.Flags().StringVarP(&fileFormat, "format", "f", "csv",
 		"File format to analyze (csv, json)")
+	scanCmd.Flags().BoolVarP(&recursive, "recursive", "r", false,
+		"Search directories recursively")
+	scanCmd.Flags().Int64Var(&minSize, "min-size", 0,
+		"Minimum file size in bytes")
+	scanCmd.Flags().Int64Var(&maxSize, "max-size", 0,
+		"Maximum file size in bytes")
 
-	// Mark dir flag as required
 	scanCmd.MarkFlagRequired("dir")
 }
