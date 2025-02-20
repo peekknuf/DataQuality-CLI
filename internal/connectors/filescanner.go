@@ -22,6 +22,7 @@ type DiscoveryOptions struct {
 	MaxSize        int64
 	ModifiedAfter  time.Time
 	ModifiedBefore time.Time
+	Progress       func(path string, d fs.DirEntry, err error) error
 }
 
 func DiscoverFiles(root string, ext string, options DiscoveryOptions) ([]FileMeta, error) {
@@ -88,8 +89,16 @@ func DiscoverFiles(root string, ext string, options DiscoveryOptions) ([]FileMet
 		return nil
 	}
 
-	if err := filepath.WalkDir(root, walkFunc); err != nil {
-		return nil, fmt.Errorf("directory walk error: %w", err)
+	if options.Progress != nil {
+		err = filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
+			// Call progress callback
+			if err := options.Progress(path, d, err); err != nil {
+				return err
+			}
+			return walkFunc(path, d, err)
+		})
+	} else {
+		err = filepath.WalkDir(root, walkFunc)
 	}
 
 	if len(files) == 0 {
