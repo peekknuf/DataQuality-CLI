@@ -18,6 +18,7 @@ var (
 	dirPath    string
 	fileFormat string
 	recursive  bool
+	verbose    bool
 	minSize    int64
 	maxSize    int64
 )
@@ -53,15 +54,17 @@ for quality metrics and statistics`,
 			fmt.Printf("- Distinct Ratio: %.2f\n", metrics.DistinctRatio)
 
 			// Display column stats
-			for _, stats := range profiler.ColumnStats {
-				fmt.Printf("\nColumn: %s\n", stats.Name)
-				fmt.Printf("  Type: %s\n", stats.Type)
-				fmt.Printf("  Nulls: %d\n", stats.NullCount)
-				fmt.Printf("  Distinct: %d\n", stats.DistinctCount)
-				fmt.Printf("  Min: %s\n", stats.Min)
-				fmt.Printf("  Max: %s\n", stats.Max)
+			if verbose {
+				for _, stats := range profiler.ColumnStats {
+					fmt.Printf("\nColumn: %s\n", stats.Name)
+					fmt.Printf("  Type: %s\n", stats.Type)
+					fmt.Printf("  Nulls: %d\n", stats.NullCount)
+					fmt.Printf("  Distinct: %d\n", stats.DistinctCount)
+					fmt.Printf("  Min: %s\n", stats.Min)
+					fmt.Printf("  Max: %s\n", stats.Max)
+				}
+				return
 			}
-			return
 		}
 
 		// Count total files/directories
@@ -78,7 +81,7 @@ for quality metrics and statistics`,
 		bar := progressbar.NewOptions(totalItems,
 			progressbar.OptionSetWriter(os.Stderr),
 			progressbar.OptionEnableColorCodes(true),
-			progressbar.OptionSetDescription("[cyan][1/3][reset] Scanning files..."),
+			progressbar.OptionSetDescription("[cyan][reset] Scanning files..."),
 			progressbar.OptionSetTheme(progressbar.Theme{
 				Saucer:        "[green]=[reset]",
 				SaucerHead:    "[green]>[reset]",
@@ -130,13 +133,15 @@ for quality metrics and statistics`,
 			fmt.Printf("- Distinct Ratio: %.2f\n", metrics.DistinctRatio)
 
 			// Display column stats
-			for _, stats := range profiler.ColumnStats {
-				fmt.Printf("\nColumn: %s\n", stats.Name)
-				fmt.Printf("  Type: %s\n", stats.Type)
-				fmt.Printf("  Nulls: %d\n", stats.NullCount)
-				fmt.Printf("  Distinct: %d\n", stats.DistinctCount)
-				fmt.Printf("  Min: %s\n", stats.Min)
-				fmt.Printf("  Max: %s\n", stats.Max)
+			if verbose {
+				for _, stats := range profiler.ColumnStats {
+					fmt.Printf("\nColumn: %s\n", stats.Name)
+					fmt.Printf("  Type: %s\n", stats.Type)
+					fmt.Printf("  Nulls: %d\n", stats.NullCount)
+					fmt.Printf("  Distinct: %d\n", stats.DistinctCount)
+					fmt.Printf("  Min: %s\n", stats.Min)
+					fmt.Printf("  Max: %s\n", stats.Max)
+				}
 			}
 		}
 
@@ -155,6 +160,8 @@ func init() {
 		"File format to analyze (csv, json)")
 	scanCmd.Flags().BoolVarP(&recursive, "recursive", "r", false,
 		"Search directories recursively")
+	scanCmd.Flags().BoolVarP(&verbose, "verbose", "v", false,
+		"Display detailed quality metrics")
 	scanCmd.Flags().Int64Var(&minSize, "min-size", 0,
 		"Minimum file size in bytes")
 	scanCmd.Flags().Int64Var(&maxSize, "max-size", 0,
