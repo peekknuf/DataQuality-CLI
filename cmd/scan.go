@@ -7,8 +7,8 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/peekknuf/dataqa/internal/connectors"
-	"github.com/peekknuf/dataqa/internal/profiler"
+	"github.com/peekknuf/DataQuality-CLI/internal/connectors"
+	"github.com/peekknuf/DataQuality-CLI/internal/profiler"
 	"github.com/schollz/progressbar/v3"
 	"github.com/spf13/cobra"
 )
@@ -26,7 +26,7 @@ var (
 var scanCmd = &cobra.Command{
 	Use:   "scan",
 	Short: "Scan directory for data files",
-	Long: `Scan a directory and analyze data files 
+	Long: `Scan a directory and analyze data files
 for quality metrics and statistics`,
 	Run: func(cmd *cobra.Command, args []string) {
 		if dirPath == "" {

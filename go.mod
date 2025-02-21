@@ -1,4 +1,4 @@
-module github.com/peekknuf/dataqa
+module github.com/peekknuf/DataQuality-CLI
 
 go 1.23.4
 
