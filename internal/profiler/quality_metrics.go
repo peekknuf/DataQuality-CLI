@@ -12,18 +12,14 @@ func (p *CSVProfiler) CalculateQuality() QualityMetrics {
 		TotalRows: p.RowCount,
 	}
 
-	// Calculate null percentage
 	totalNulls := 0
 	for _, stats := range p.ColumnStats {
 		totalNulls += stats.NullCount
 	}
 	metrics.NullPercentage = float64(totalNulls) / float64(p.RowCount*len(p.ColumnStats))
 
-	// Calculate type consistency
-	// (This is a placeholder - implement based on your needs)
 	metrics.TypeConsistency = 1.0
 
-	// Calculate distinct ratio
 	totalDistinct := 0
 	for _, stats := range p.ColumnStats {
 		totalDistinct += stats.DistinctCount

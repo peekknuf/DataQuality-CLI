@@ -8,7 +8,7 @@ import (
 	"path/filepath"
 
 	"github.com/peekknuf/dataqa/internal/connectors"
-	"github.com/peekknuf/dataqa/internal/profiler" // Import the profiler package
+	"github.com/peekknuf/dataqa/internal/profiler"
 	"github.com/schollz/progressbar/v3"
 	"github.com/spf13/cobra"
 )
@@ -33,27 +33,24 @@ for quality metrics and statistics`,
 			log.Fatal("You must specify a directory with --dir")
 		}
 
-		// Check if a specific file is provided based on the -n flag
 		if filename != "" {
 			specificFile := filepath.Join(dirPath, filename)
 			if _, err := os.Stat(specificFile); os.IsNotExist(err) {
 				log.Fatalf("File not found: %s", specificFile)
 			}
 
-			// Process the specific file
 			profiler := profiler.NewCSVProfiler(specificFile)
 			if err := profiler.Profile(); err != nil {
 				log.Fatalf("Failed to profile %s: %v", specificFile, err)
 			}
 
-			// Calculate and display quality metrics
 			metrics := profiler.CalculateQuality()
 			fmt.Printf("\nFile: %s\n", specificFile)
 			fmt.Printf("- Rows: %d\n", profiler.RowCount)
 			fmt.Printf("- Null Percentage: %.2f%%\n", metrics.NullPercentage*100)
 			fmt.Printf("- Distinct Ratio: %.2f\n", metrics.DistinctRatio)
 
-			// Display column stats
+			// check for verbose flag
 			if verbose {
 				for _, stats := range profiler.ColumnStats {
 					fmt.Printf("\nColumn: %s\n", stats.Name)
@@ -67,17 +64,15 @@ for quality metrics and statistics`,
 			}
 		}
 
-		// Count total files/directories
 		totalItems := 0
 		filepath.WalkDir(dirPath, func(path string, d fs.DirEntry, err error) error {
 			if err != nil {
-				return err // Handle errors during counting
+				return err
 			}
 			totalItems++
 			return nil
 		})
 
-		// Initialize progress bar
 		bar := progressbar.NewOptions(totalItems,
 			progressbar.OptionSetWriter(os.Stderr),
 			progressbar.OptionEnableColorCodes(true),
@@ -91,48 +86,42 @@ for quality metrics and statistics`,
 			}),
 			progressbar.OptionShowCount(),
 			progressbar.OptionOnCompletion(func() {
-				fmt.Println() // Newline after completion
+				fmt.Println()
 			}),
 		)
 
-		// Set up progress callback
 		options := connectors.DiscoveryOptions{
 			Recursive: recursive,
 			MinSize:   minSize,
 			MaxSize:   maxSize,
 			Progress: func(path string, d fs.DirEntry, err error) error {
-				bar.Add(1) // Increment progress
+				bar.Add(1)
 				return nil
 			},
 		}
 
-		// Perform the scan
 		files, err := connectors.DiscoverFiles(dirPath, fileFormat, options)
 		if err != nil {
 			log.Fatalf("Scan failed: %v", err)
 		}
 
-		// Process each file with the profiler
 		for _, file := range files {
 			if file.IsDir {
-				continue // Skip directories
+				continue
 			}
 
-			// Initialize and run the profiler
 			profiler := profiler.NewCSVProfiler(file.Path)
 			if err := profiler.Profile(); err != nil {
 				log.Printf("Failed to profile %s: %v", file.Path, err)
 				continue
 			}
 
-			// Calculate and display quality metrics
 			metrics := profiler.CalculateQuality()
 			fmt.Printf("\nFile: %s\n", file.Path)
 			fmt.Printf("- Rows: %d\n", profiler.RowCount)
 			fmt.Printf("- Null Percentage: %.2f%%\n", metrics.NullPercentage*100)
 			fmt.Printf("- Distinct Ratio: %.2f\n", metrics.DistinctRatio)
 
-			// Display column stats
 			if verbose {
 				for _, stats := range profiler.ColumnStats {
 					fmt.Printf("\nColumn: %s\n", stats.Name)
@@ -145,7 +134,6 @@ for quality metrics and statistics`,
 			}
 		}
 
-		// Ensure the progress bar is complete
 		bar.Finish()
 	},
 }

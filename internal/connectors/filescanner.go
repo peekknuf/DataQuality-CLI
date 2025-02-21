@@ -26,12 +26,10 @@ type DiscoveryOptions struct {
 }
 
 func DiscoverFiles(root string, ext string, options DiscoveryOptions) ([]FileMeta, error) {
-	// Validate root directory
 	if root == "" {
 		return nil, fmt.Errorf("root directory cannot be empty")
 	}
 
-	// Check if directory exists
 	stat, err := os.Stat(root)
 	if os.IsNotExist(err) {
 		return nil, fmt.Errorf("directory does not exist: %s", root)
@@ -40,7 +38,6 @@ func DiscoverFiles(root string, ext string, options DiscoveryOptions) ([]FileMet
 		return nil, fmt.Errorf("path is not a directory: %s", root)
 	}
 
-	// Validate extension
 	ext = strings.TrimPrefix(ext, ".")
 	if ext == "" {
 		return nil, fmt.Errorf("file extension cannot be empty")
@@ -52,19 +49,16 @@ func DiscoverFiles(root string, ext string, options DiscoveryOptions) ([]FileMet
 			return fmt.Errorf("error accessing path %s: %w", path, err)
 		}
 
-		// Skip directories if not recursive
 		if d.IsDir() && path != root && !options.Recursive {
 			return filepath.SkipDir
 		}
 
-		// Check file extension match
 		if !d.IsDir() && strings.EqualFold(filepath.Ext(path), "."+ext) {
 			info, err := d.Info()
 			if err != nil {
 				return fmt.Errorf("error getting file info for %s: %w", path, err)
 			}
 
-			// Apply filters
 			if options.MinSize > 0 && info.Size() < options.MinSize {
 				return nil
 			}
@@ -91,7 +85,6 @@ func DiscoverFiles(root string, ext string, options DiscoveryOptions) ([]FileMet
 
 	if options.Progress != nil {
 		err = filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
-			// Call progress callback
 			if err := options.Progress(path, d, err); err != nil {
 				return err
 			}

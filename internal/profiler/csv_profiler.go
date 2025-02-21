@@ -33,7 +33,6 @@ func (p *CSVProfiler) Profile() error {
 		return fmt.Errorf("failed to read headers: %w", err)
 	}
 
-	// Initialize column stats
 	for _, header := range headers {
 		p.ColumnStats[header] = &ColumnStats{
 			Name:         header,
@@ -41,7 +40,6 @@ func (p *CSVProfiler) Profile() error {
 		}
 	}
 
-	// Process rows
 	for {
 		record, err := reader.Read()
 		if err == io.EOF {
