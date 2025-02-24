@@ -119,8 +119,8 @@ for quality metrics and statistics`,
 			metrics := profiler.CalculateQuality()
 			fmt.Printf("\nFile: %s\n", file.Path)
 			fmt.Printf("- Rows: %d\n", profiler.RowCount)
-			fmt.Printf("- Null Percentage: %.2f%%\n", metrics.NullPercentage*100)
-			fmt.Printf("- Distinct Ratio: %.2f\n", metrics.DistinctRatio)
+			fmt.Printf("- Null Value Percentage: %.2f%%\n", metrics.NullPercentage*100)
+			fmt.Printf("- Distinct Row Ratio: %.2f\n", metrics.DistinctRatio)
 
 			if verbose {
 				for _, stats := range profiler.ColumnStats {
