@@ -21,7 +21,7 @@ THE SOFTWARE.
 */
 package main
 
-import "github.com/peekknuf/dataqa/cmd"
+import "github.com/peekknuf/DataQuality-CLI/cmd"
 
 func main() {
 	cmd.Execute()
