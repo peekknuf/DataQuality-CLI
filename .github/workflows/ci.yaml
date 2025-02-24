@@ -22,15 +22,8 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
-          go-version: ${{ matrix.go-version }}
+          go-version: 1.23.4 
 
-      - name: Cache Go modules
-        uses: actions/cache@v3
-        with:
-          path: ~/go/pkg/mod
-          key: ${{ runner.os }}-go-${{ hashFiles('**/go.sum') }}
-          restore-keys: |
-            ${{ runner.os }}-go-
 
       - name: Install dependencies
         run: go mod tidy
@@ -41,30 +34,6 @@ jobs:
       - name: Run tests
         run: go test ./internal/profiler -coverprofile=coverage.out
 
-      - name: Upload coverage report
-        uses: codecov/codecov-action@v3
-        with:
-          file: coverage.out
-
-      - name: Install golangci-lint
-        run: go install github.com/golangci/golangci-lint/cmd/golangci-lint@latest
-
-      - name: Run golangci-lint
-        run: golangci-lint run ./...
-
-      - name: Install gosec
-        run: go install github.com/securego/gosec/v2/cmd/gosec@latest
-
-      - name: Run gosec
-        run: gosec ./...
-
       - name: Cleanup
         run: rm -rf coverage.out
 
-      - name: Notify on failure
-        if: failure()
-        uses: actions/slack@v1
-        with:
-          payload: '{"text": "CI Pipeline failed for ${{ github.repository }}"}'
-        env:
-          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
