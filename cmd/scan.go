@@ -74,7 +74,7 @@ for quality metrics and statistics`,
 			MaxSize:   maxSize,
 		}
 
-		files, fileCount, err := connectors.DiscoverFiles(dirPath, fileFormat, options)
+		files, fileCount, err := connectors.DiscoverFiles(dirPath, "csv", options)
 		if err != nil {
 			log.Fatalf("Scan failed: %v", err)
 		}
@@ -83,34 +83,28 @@ for quality metrics and statistics`,
 		bar := progressbar.NewOptions(fileCount,
 			progressbar.OptionSetWriter(os.Stderr),
 			progressbar.OptionEnableColorCodes(true),
-			progressbar.OptionSetDescription(fmt.Sprintf("[cyan][reset] Processing files... (%d/%d)", 0, fileCount)),
+			progressbar.OptionSetDescription(fmt.Sprintf("[cyan][reset] Processing files... (0/%d)", fileCount)),
 			progressbar.OptionSetTheme(progressbar.Theme{
-				Saucer:        "[green]=[reset]",
-				SaucerHead:    "[green]>[reset]",
-				SaucerPadding: " ",
-				BarStart:      "[",
-				BarEnd:        "]",
+					Saucer:        "[green]=[reset]",
+					SaucerHead:    "[green]>[reset]",
+					SaucerPadding: " ",
+					BarStart:      "[",
+					BarEnd:        "]",
 			}),
 			progressbar.OptionSetWidth(20),
 			progressbar.OptionOnCompletion(func() {
-				fmt.Println()
+					fmt.Println()
 			}),
 		)
 
-		startTime := time.Now() // Start timer
-
-		// Process the files with progress bar updates
-		processedCount := 0
+		startTime := time.Now()
+		fmt.Println("-----ANALYSIS STARTED-----")
+		// Process
+		processedCount := 1
 		for _, file := range files {
 			if file.IsDir {
 				continue
 			}
-
-			processedCount++
-			bar.Add(1) // Update the progress bar
-
-			// Update the description with current count
-			bar.Describe(fmt.Sprintf("[cyan][reset] Processing files... (%d/%d)", processedCount, fileCount))
 
 			profiler := profiler.NewCSVProfiler(file.Path)
 			if err := profiler.Profile(); err != nil {
@@ -119,10 +113,16 @@ for quality metrics and statistics`,
 			}
 
 			metrics := profiler.CalculateQuality()
+
 			fmt.Printf("\nFile: %s\n", file.Path)
 			fmt.Printf("- Rows: %d\n", profiler.RowCount)
 			fmt.Printf("- Null Value Percentage: %.2f%%\n", metrics.NullPercentage*100)
 			fmt.Printf("- Distinct Row Ratio: %.2f\n", metrics.DistinctRatio)
+
+			bar.Describe(fmt.Sprintf("[cyan][reset] Processing files... (%d/%d)", processedCount, fileCount))
+
+			processedCount++
+			bar.Add(1)
 
 			if verbose {
 				for _, stats := range profiler.ColumnStats {
@@ -136,8 +136,12 @@ for quality metrics and statistics`,
 			}
 		}
 
+		bar.Describe(fmt.Sprintf("[cyan][reset] Processing files... (%d/%d)", processedCount, fileCount))
 		bar.Finish()
-		fmt.Printf("Total processing time: %.2f seconds\n", time.Since(startTime).Seconds()) // Round to two decimals
+
+		fmt.Printf("Total processing time: %.2f seconds\n", time.Since(startTime).Seconds())
+		fmt.Println()
+		fmt.Println("-----WE'RE DONE-----")
 	},
 }
 
