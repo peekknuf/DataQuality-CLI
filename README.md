@@ -23,6 +23,21 @@ A command-line tool for analyzing data quality metrics in CSV files, designed fo
   - Min/Max value detection.
   - Sample value collection.
 
+## Installation
+
+To install the DataQuality-CLI tool, follow these steps:
+
+1. Clone the repository:
+   ```bash
+   git clone https://github.com/peekknuf/DataQuality-CLI.git
+   cd DataQuality-CLI
+   ```
+
+2. Build the project:
+   ```bash
+   go build -o dataqa
+   ```
+
 ## Usage
 
 ### Scan a Specific File
