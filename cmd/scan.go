@@ -2,7 +2,6 @@ package cmd
 
 import (
 	"fmt"
-	"io/fs"
 	"log"
 	"os"
 	"path/filepath"
@@ -30,18 +29,21 @@ var scanCmd = &cobra.Command{
 for quality metrics and statistics`,
 	Run: func(cmd *cobra.Command, args []string) {
 		if dirPath == "" {
-			log.Fatal("You must specify a directory with --dir")
+			log.Printf("You must specify a directory with --dir")
+			return
 		}
 
 		if filename != "" {
 			specificFile := filepath.Join(dirPath, filename)
 			if _, err := os.Stat(specificFile); os.IsNotExist(err) {
-				log.Fatalf("File not found: %s", specificFile)
+				log.Printf("File not found: %s", specificFile)
+				return
 			}
 
 			profiler := profiler.NewCSVProfiler(specificFile)
 			if err := profiler.Profile(); err != nil {
-				log.Fatalf("Failed to profile %s: %v", specificFile, err)
+				log.Printf("Failed to profile %s: %v", specificFile, err)
+				return
 			}
 
 			metrics := profiler.CalculateQuality()
@@ -64,19 +66,23 @@ for quality metrics and statistics`,
 			}
 		}
 
-		totalItems := 0
-		filepath.WalkDir(dirPath, func(path string, d fs.DirEntry, err error) error {
-			if err != nil {
-				return err
-			}
-			totalItems++
-			return nil
-		})
+		// First, count the files
+		options := connectors.DiscoveryOptions{
+			Recursive: recursive,
+			MinSize:   minSize,
+			MaxSize:   maxSize,
+		}
 
-		bar := progressbar.NewOptions(totalItems,
+		files, fileCount, err := connectors.DiscoverFiles(dirPath, fileFormat, options)
+		if err != nil {
+			log.Fatalf("Scan failed: %v", err)
+		}
+
+		// Now create the progress bar with the correct count
+		bar := progressbar.NewOptions(fileCount,
 			progressbar.OptionSetWriter(os.Stderr),
 			progressbar.OptionEnableColorCodes(true),
-			progressbar.OptionSetDescription("[cyan][reset] Scanning files..."),
+			progressbar.OptionSetDescription("[cyan][reset] Processing files..."),
 			progressbar.OptionSetTheme(progressbar.Theme{
 				Saucer:        "[green]=[reset]",
 				SaucerHead:    "[green]>[reset]",
@@ -90,25 +96,13 @@ for quality metrics and statistics`,
 			}),
 		)
 
-		options := connectors.DiscoveryOptions{
-			Recursive: recursive,
-			MinSize:   minSize,
-			MaxSize:   maxSize,
-			Progress: func(path string, d fs.DirEntry, err error) error {
-				bar.Add(1)
-				return nil
-			},
-		}
-
-		files, err := connectors.DiscoverFiles(dirPath, fileFormat, options)
-		if err != nil {
-			log.Fatalf("Scan failed: %v", err)
-		}
-
+		// Process the files with progress bar updates
 		for _, file := range files {
 			if file.IsDir {
 				continue
 			}
+
+			bar.Add(1)
 
 			profiler := profiler.NewCSVProfiler(file.Path)
 			if err := profiler.Profile(); err != nil {
