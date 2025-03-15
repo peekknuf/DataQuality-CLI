@@ -5,6 +5,7 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"time"
 
 	"github.com/peekknuf/DataQuality-CLI/internal/connectors"
 	"github.com/peekknuf/DataQuality-CLI/internal/profiler"
@@ -82,7 +83,7 @@ for quality metrics and statistics`,
 		bar := progressbar.NewOptions(fileCount,
 			progressbar.OptionSetWriter(os.Stderr),
 			progressbar.OptionEnableColorCodes(true),
-			progressbar.OptionSetDescription("[cyan][reset] Processing files..."),
+			progressbar.OptionSetDescription(fmt.Sprintf("[cyan][reset] Processing files... (%d/%d)", 0, fileCount)),
 			progressbar.OptionSetTheme(progressbar.Theme{
 				Saucer:        "[green]=[reset]",
 				SaucerHead:    "[green]>[reset]",
@@ -90,19 +91,26 @@ for quality metrics and statistics`,
 				BarStart:      "[",
 				BarEnd:        "]",
 			}),
-			progressbar.OptionShowCount(),
+			progressbar.OptionSetWidth(20),
 			progressbar.OptionOnCompletion(func() {
 				fmt.Println()
 			}),
 		)
 
+		startTime := time.Now() // Start timer
+
 		// Process the files with progress bar updates
+		processedCount := 0
 		for _, file := range files {
 			if file.IsDir {
 				continue
 			}
 
-			bar.Add(1)
+			processedCount++
+			bar.Add(1) // Update the progress bar
+
+			// Update the description with current count
+			bar.Describe(fmt.Sprintf("[cyan][reset] Processing files... (%d/%d)", processedCount, fileCount))
 
 			profiler := profiler.NewCSVProfiler(file.Path)
 			if err := profiler.Profile(); err != nil {
@@ -129,6 +137,7 @@ for quality metrics and statistics`,
 		}
 
 		bar.Finish()
+		fmt.Printf("Total processing time: %.2f seconds\n", time.Since(startTime).Seconds()) // Round to two decimals
 	},
 }
 

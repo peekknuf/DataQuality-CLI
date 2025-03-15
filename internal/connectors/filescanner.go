@@ -79,9 +79,9 @@ func DiscoverFiles(root string, ext string, options DiscoveryOptions) ([]FileMet
 				Modified: info.ModTime(),
 				IsDir:    d.IsDir(),
 			})
+			fileCount++
 		}
 
-		fileCount++
 		return nil
 	}
 
