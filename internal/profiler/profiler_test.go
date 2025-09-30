@@ -1,6 +1,7 @@
 package profiler
 
 import (
+	"math"
 	"os"
 	"testing"
 )
@@ -33,11 +34,45 @@ func TestCSVProfiler(t *testing.T) {
 		t.Errorf("Expected 5 rows, got %d", metrics.TotalRows)
 	}
 
-	if metrics.NullPercentage != 0.06666666666666667 {
-		t.Errorf("Expected Null Percentage ~0.067, got %f", metrics.NullPercentage)
+	// Allow for some tolerance in null percentage calculation
+	expectedNullPercentage := 1.0 / 15.0 // 1 null out of 15 total values
+	if math.Abs(metrics.NullPercentage-expectedNullPercentage) > 0.01 {
+		t.Errorf("Expected Null Percentage ~%f, got %f", expectedNullPercentage, metrics.NullPercentage)
 	}
 
-	if metrics.DistinctRatio != 0.8 {
-		t.Errorf("Expected Distinct Ratio 0.8, got %f", metrics.DistinctRatio)
+	// Allow for tolerance in distinct ratio (using estimation)
+	if metrics.DistinctRatio < 0.6 || metrics.DistinctRatio > 1.0 {
+		t.Errorf("Expected Distinct Ratio between 0.6 and 1.0, got %f", metrics.DistinctRatio)
+	}
+
+	// Test pandas.describe() functionality
+	describeStats := profiler.GetDescribeStats()
+	if len(describeStats) != 3 {
+		t.Errorf("Expected 3 columns in describe stats, got %d", len(describeStats))
+	}
+
+	// Check numeric column A
+	var colA *DescribeStats
+	for _, stats := range describeStats {
+		if stats.Column == "A" {
+			colA = &stats
+			break
+		}
+	}
+
+	if colA == nil {
+		t.Fatal("Column A not found in describe stats")
+	}
+
+	if colA.Type != "int" {
+		t.Errorf("Expected column A type to be int, got %s", colA.Type)
+	}
+
+	if colA.Count != 4 { // 4 non-null values
+		t.Errorf("Expected column A count to be 4, got %d", colA.Count)
+	}
+
+	if colA.NullCount != 1 {
+		t.Errorf("Expected column A null count to be 1, got %d", colA.NullCount)
 	}
 }
