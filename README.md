@@ -7,12 +7,11 @@ A high-performance CLI tool that provides **comprehensive statistics and analysi
 
 ## Features
 
-- ⚡ **High Performance**: 10x+ faster than pandas.describe() through parallel processing
-- 🧠 **Auto-Optimization**: Automatically detects CPU cores, memory, and optimal settings
-- 📊 **pandas.describe() Compatible**: Exact same output format as pandas.describe()
-- 🔧 **Simple Interface**: Ultra-simple CLI with smart defaults
-- 📈 **Scalable**: Efficient processing of files from MB to GB scale
-- 💾 **Memory Bounded**: Never exceeds configured memory limits
+- **High Performance**: 10x+ faster than pandas.describe() through parallel processing
+- **Auto-Optimization**: Automatically detects CPU cores, memory, and optimal settings
+- **Simple Interface**: Ultra-simple CLI with smart defaults
+- **Scalable**: Efficient processing of files from MB to GB scale
+- **Memory Bounded**: Never exceeds configured memory limits
 
 ## Quick Start
 
@@ -44,46 +43,7 @@ dataqa describe file.csv --sample 10000            # Quick preview mode
 dataqa describe file.csv --output results.txt      # Save output
 ```
 
-### Example Output
-
 ```
-Auto-detected settings: 8 workers, 1024MB memory, 1000 sample size
-File: sales_data.csv
-Rows: 1000000
-Processing Time: 2.3s
-
-=== pandas.describe() style statistics ===
-Column                  Count     Null   Type         Mean          Std          Min          25%          50%          75%          Max
-------------------------------------------------------------------------------------------------------------------------------------------------------
-order_id                 1000000        0    int     500000.50    288675.13            1       250001.25       500000.50       749998.75       1000000
-customer_id              1000000        0    int     475000.25    274286.12            1       237501.13       475000.25       712499.38        950000
-price                    1000000        0    float        49.99        28.87         0.99          25.00          49.99          74.99          99.99
-category                 1000000        0 string            -            -     Electronics            -              -              -         Toys
-                                                                 unique:          12         top:    Electronics        freq:         83333
-quantity                 1000000        0    int          2.50         1.12            1            2.00            3.00            3.00              5
-
-Total processing time: 2.3s
-Files processed: 1
-```
-
-## Auto-Detection Strategy
-
-DataQuality-CLI automatically optimizes settings for maximum performance:
-
-- **Workers**: `runtime.NumCPU()` (uses all available cores)
-- **Memory**: 75% of available system RAM (capped at 8GB)
-- **Chunk Size**: Auto-calculated based on file size and memory
-- **Sample Size**: Optimized based on available memory
-
-## Performance
-
-| Metric | pandas.describe() | DataQuality-CLI | Improvement |
-|--------|-------------------|-----------------|-------------|
-| Processing Speed | 100 MB/s | 1000+ MB/s | 10x+ |
-| Memory Usage | High | Bounded | 50%+ reduction |
-| CPU Utilization | Single-core | Multi-core | 8x+ |
-| Auto-Optimization | Manual | Automatic | ✅ |
-
 ## Architecture
 
 The tool follows a simplified 5-component architecture:
@@ -201,16 +161,6 @@ go build -o dataqa main.go
 - Quick data quality checks
 - Generate data summaries for stakeholders
 
-## Comparison with pandas.describe()
-
-| Feature | pandas.describe() | DataQuality-CLI |
-|---------|-------------------|-----------------|
-| Performance | Moderate | 10x+ faster |
-| Memory Usage | High | Bounded |
-| CLI Interface | Python only | Native CLI |
-| Parallel Processing | Limited | Built-in |
-| Auto-Optimization | Manual | Automatic |
-| Large File Support | Limited | Excellent |
 
 ## License
 
@@ -220,8 +170,3 @@ DataQuality-CLI is released under the [MIT License](LICENSE).
 
 We welcome contributions! Please feel free to submit issues and enhancement requests.
 
-## Support
-
-- [GitHub Issues](https://github.com/peekknuf/DataQuality-CLI/issues) - Report bugs and request features
-- [Project Goals](PROJECT_GOALS.md) - Project requirements and design philosophy
-- [Refactoring Plan](REFACTOR_PLAN.md) - Implementation details and architecture decisions
