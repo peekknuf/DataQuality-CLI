@@ -10,9 +10,10 @@ var cfgFile string
 
 var rootCmd = &cobra.Command{
 	Use:   "dataqa",
-	Short: "Data Quality Assurance CLI",
-	Long: `A high-performance data quality assessment tool 
-for CSV and structured data files`,
+	Short: "High-performance CSV statistics and analysis tool",
+	Long: `A high-performance CLI tool that provides comprehensive statistics and analysis
+for CSV files with parallel processing capabilities. Optimized for speed and memory efficiency
+with automatic resource optimization.`,
 }
 
 func Execute() {
