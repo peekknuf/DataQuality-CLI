@@ -31,7 +31,7 @@ func NewHighPerformanceCSVEngine(filePath string, workers, memoryLimitMB int) *H
 	if workers == 0 {
 		workers = runtime.NumCPU() * 2 // Use 2x CPU cores for I/O parallelism
 	}
-	
+
 	chunkSize := 1024 * 1024 // 1MB chunks for optimal I/O
 	if memoryLimitMB > 2048 {
 		chunkSize = 2 * 1024 * 1024 // 2MB chunks for systems with more memory
@@ -54,19 +54,40 @@ func (e *HighPerformanceCSVEngine) Describe() *DescribeResult {
 		Path: e.FilePath,
 	}
 
-	// Create memory-mapped reader
+	fileData, err := e.readEntireFile()
+	if err != nil {
+		result.Error = err
+		return result
+	}
+
+	csvReader := csv.NewReader(strings.NewReader(string(fileData)))
+	headers, err := e.readHeaders(csvReader)
+	if err != nil {
+		result.Error = err
+		return result
+	}
+
+	processors := e.createProcessors(headers)
+	totalRows := e.processRecords(csvReader, processors)
+
+	result.ColumnStats, result.RowCount = e.generateResults(processors, totalRows, len(headers))
+	result.NullPercentage = e.calculateNullPercentage(result.ColumnStats, result.RowCount, len(headers))
+	result.ProcessingTime = time.Since(startTime)
+
+	return result
+}
+
+func (e *HighPerformanceCSVEngine) readEntireFile() ([]byte, error) {
 	mmapConfig := mmapio.DefaultMMapConfig()
 	mmapConfig.ChunkSize = int64(e.ChunkSize)
 	mmapConfig.UseMmap = e.UseMmap
-	
+
 	mmapReader, err := mmapio.NewMMapReader(e.FilePath, mmapConfig)
 	if err != nil {
-		result.Error = fmt.Errorf("failed to create memory-mapped reader: %v", err)
-		return result
+		return nil, fmt.Errorf("failed to create memory-mapped reader: %v", err)
 	}
 	defer mmapReader.Close()
 
-	// Read entire file into memory for fastest processing
 	fileSize := mmapReader.Size()
 	fileData := make([]byte, fileSize)
 	totalRead := 0
@@ -74,47 +95,45 @@ func (e *HighPerformanceCSVEngine) Describe() *DescribeResult {
 	for {
 		chunk, err := mmapReader.ReadChunk()
 		if err != nil {
-			result.Error = fmt.Errorf("failed to read chunk: %v", err)
-			return result
+			return nil, fmt.Errorf("failed to read chunk: %v", err)
 		}
 		if chunk == nil {
-			break // EOF
+			break
 		}
-		
+
 		if totalRead+len(chunk) > len(fileData) {
-			result.Error = fmt.Errorf("chunk size exceeds buffer")
-			return result
+			return nil, fmt.Errorf("chunk size exceeds buffer")
 		}
-		
+
 		copy(fileData[totalRead:], chunk)
 		totalRead += len(chunk)
 	}
 
-	// Resize to actual data read
-	fileData = fileData[:totalRead]
+	return fileData[:totalRead], nil
+}
 
-	// Create CSV reader from memory-mapped data
-	csvReader := csv.NewReader(strings.NewReader(string(fileData)))
-	
-	// Read headers
+func (e *HighPerformanceCSVEngine) readHeaders(csvReader *csv.Reader) ([]string, error) {
 	headers, err := csvReader.Read()
 	if err != nil {
-		result.Error = fmt.Errorf("failed to read headers: %v", err)
-		return result
+		return nil, fmt.Errorf("failed to read headers: %v", err)
 	}
 
 	if len(headers) == 0 {
-		result.Error = fmt.Errorf("no columns found in file")
-		return result
+		return nil, fmt.Errorf("no columns found in file")
 	}
 
-	// Create high-performance column processors
+	return headers, nil
+}
+
+func (e *HighPerformanceCSVEngine) createProcessors(headers []string) []*HighPerformanceColumnProcessor {
 	processors := make([]*HighPerformanceColumnProcessor, len(headers))
 	for i, header := range headers {
 		processors[i] = NewHighPerformanceColumnProcessor(header)
 	}
+	return processors
+}
 
-	// Process all records directly (simplified for reliability)
+func (e *HighPerformanceCSVEngine) processRecords(csvReader *csv.Reader, processors []*HighPerformanceColumnProcessor) int {
 	totalRows := 0
 	for {
 		record, err := csvReader.Read()
@@ -122,36 +141,47 @@ func (e *HighPerformanceCSVEngine) Describe() *DescribeResult {
 			break
 		}
 		if err != nil {
-			result.Error = fmt.Errorf("failed to read record: %v", err)
-			return result
+			return 0 // Error will be handled by caller
 		}
 
-		// Process each column
-		for i, value := range record {
-			if i < len(processors) {
-				processors[i].ProcessValueFast(value)
-			}
-		}
+		e.processRecord(record, processors)
 		totalRows++
 	}
+	return totalRows
+}
 
-	// Generate final statistics
-	result.ColumnStats = make([]ColumnStats, len(processors))
+func (e *HighPerformanceCSVEngine) processRecord(record []string, processors []*HighPerformanceColumnProcessor) {
+	for i, value := range record {
+		if i < len(processors) {
+			processors[i].ProcessValueFast(value)
+		}
+	}
+}
+
+func (e *HighPerformanceCSVEngine) generateResults(processors []*HighPerformanceColumnProcessor, totalRows int, headerCount int) ([]ColumnStats, int) {
+	columnStats := make([]ColumnStats, len(processors))
 	var totalNulls int
 
 	for i, processor := range processors {
 		stats := processor.GetStats()
-		result.ColumnStats[i] = stats
+		columnStats[i] = stats
 		totalNulls += stats.NullCount
 	}
 
-	result.RowCount = totalRows
-	if result.RowCount > 0 {
-		result.NullPercentage = float64(totalNulls) / float64(result.RowCount*len(headers)) * 100
-	}
-	result.ProcessingTime = time.Since(startTime)
+	return columnStats, totalRows
+}
 
-	return result
+func (e *HighPerformanceCSVEngine) calculateNullPercentage(columnStats []ColumnStats, rowCount int, headerCount int) float64 {
+	if rowCount == 0 {
+		return 0
+	}
+
+	var totalNulls int
+	for _, stats := range columnStats {
+		totalNulls += stats.NullCount
+	}
+
+	return float64(totalNulls) / float64(rowCount*headerCount) * 100
 }
 
 // HighPerformanceColumnProcessor provides lock-free, highly optimized column statistics
@@ -166,7 +196,7 @@ type HighPerformanceColumnProcessor struct {
 	sumSquared float64
 	min        float64
 	max        float64
-	
+
 	// String statistics - use sync.Map for thread safety
 	valueCounts sync.Map
 	topValue    string
@@ -185,9 +215,9 @@ type HighPerformanceColumnProcessor struct {
 // NewHighPerformanceColumnProcessor creates a new high-performance column processor
 func NewHighPerformanceColumnProcessor(name string) *HighPerformanceColumnProcessor {
 	return &HighPerformanceColumnProcessor{
-		name:       name,
-		min:        math.MaxFloat64,
-		max:        -math.MaxFloat64,
+		name:        name,
+		min:         math.MaxFloat64,
+		max:         -math.MaxFloat64,
 		valueCounts: sync.Map{},
 	}
 }
@@ -229,10 +259,10 @@ func (p *HighPerformanceColumnProcessor) updateNumericStatsFast(value float64) {
 	// Use simple atomic operations for basic stats (Go doesn't have atomic float64, so use mutex for simplicity)
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	
+
 	p.sum += value
 	p.sumSquared += value * value
-	
+
 	if value < p.min {
 		p.min = value
 	}
@@ -269,96 +299,137 @@ func (p *HighPerformanceColumnProcessor) updateStringStatsFast(value string) {
 // GetStats returns the final column statistics
 func (p *HighPerformanceColumnProcessor) GetStats() ColumnStats {
 	p.mu.RLock()
-	count := int(p.count)
-	nullCount := int(p.nullCount)
-	sum := p.sum
-	sumSquared := p.sumSquared
-	min := p.min
-	max := p.max
-	
-	// Determine column type
-	hasInt := p.hasInt != 0
-	hasFloat := p.hasFloat != 0
-	hasString := p.hasString != 0
-	
-	// Make copy of sorted values for quantile calculation
-	sortedCopy := make([]float64, len(p.sortedVals))
-	copy(sortedCopy, p.sortedVals)
-	p.mu.RUnlock()
+	defer p.mu.RUnlock()
+
+	baseData := p.extractBaseData()
+	sortedCopy := p.makeSortedCopy()
 
 	stats := ColumnStats{
 		Name:      p.name,
-		Count:     count,
-		NullCount: nullCount,
+		Count:     int(baseData.count),
+		NullCount: int(baseData.nullCount),
+		Type:      p.determineColumnType(baseData),
 	}
+
+	switch stats.Type {
+	case "int", "float":
+		p.calculateNumericStats(&stats, baseData, sortedCopy)
+	case "string":
+		p.calculateStringStats(&stats)
+	}
+
+	return stats
+}
+
+func (p *HighPerformanceColumnProcessor) extractBaseData() struct {
+	count, nullCount, hasInt, hasFloat, hasString int64
+	sum, sumSquared, min, max                     float64
+} {
+	return struct {
+		count, nullCount, hasInt, hasFloat, hasString int64
+		sum, sumSquared, min, max                     float64
+	}{
+		count:      p.count,
+		nullCount:  p.nullCount,
+		sum:        p.sum,
+		sumSquared: p.sumSquared,
+		min:        p.min,
+		max:        p.max,
+		hasInt:     p.hasInt,
+		hasFloat:   p.hasFloat,
+		hasString:  p.hasString,
+	}
+}
+
+func (p *HighPerformanceColumnProcessor) determineColumnType(data struct {
+	count, nullCount, hasInt, hasFloat, hasString int64
+	sum, sumSquared, min, max                     float64
+}) string {
+	hasInt := data.hasInt != 0
+	hasFloat := data.hasFloat != 0
+	hasString := data.hasString != 0
 
 	if hasInt && !hasFloat && !hasString {
-		stats.Type = "int"
-	} else if (hasFloat || hasInt) && !hasString {
-		stats.Type = "float"
-	} else {
-		stats.Type = "string"
+		return "int"
+	}
+	if (hasFloat || hasInt) && !hasString {
+		return "float"
+	}
+	return "string"
+}
+
+func (p *HighPerformanceColumnProcessor) makeSortedCopy() []float64 {
+	sortedCopy := make([]float64, len(p.sortedVals))
+	copy(sortedCopy, p.sortedVals)
+	return sortedCopy
+}
+
+func (p *HighPerformanceColumnProcessor) calculateNumericStats(stats *ColumnStats, data struct {
+	count, nullCount, hasInt, hasFloat, hasString int64
+	sum, sumSquared, min, max                     float64
+}, sortedCopy []float64) {
+	nonNullCount := int(data.count - data.nullCount)
+	if nonNullCount > 0 {
+		stats.Mean = data.sum / float64(nonNullCount)
+		variance := (data.sumSquared / float64(nonNullCount)) - (stats.Mean * stats.Mean)
+		if variance > 0 {
+			stats.Std = math.Sqrt(variance)
+		}
 	}
 
-	// Calculate numeric statistics
-	if stats.Type == "int" || stats.Type == "float" {
-		if count-nullCount > 0 {
-			stats.Mean = sum / float64(count-nullCount)
-			variance := (sumSquared / float64(count-nullCount)) - (stats.Mean * stats.Mean)
-			if variance > 0 {
-				stats.Std = math.Sqrt(variance)
-			}
-		}
+	if data.min != math.MaxFloat64 {
+		stats.Min = fmt.Sprintf("%.6g", data.min)
+	}
+	if data.max != -math.MaxFloat64 {
+		stats.Max = fmt.Sprintf("%.6g", data.max)
+	}
 
-		if min != math.MaxFloat64 {
-			stats.Min = fmt.Sprintf("%.6g", min)
-		}
-		if max != -math.MaxFloat64 {
-			stats.Max = fmt.Sprintf("%.6g", max)
-		}
-
-		// Calculate quantiles (use all values, no sampling)
 	if len(sortedCopy) > 0 {
 		sort.Float64s(sortedCopy)
 		stats.Q25 = calculateQuantileHPP(sortedCopy, 0.25)
 		stats.Q50 = calculateQuantileHPP(sortedCopy, 0.50)
 		stats.Q75 = calculateQuantileHPP(sortedCopy, 0.75)
 	}
-	}
+}
 
-	// Calculate string statistics
-	if stats.Type == "string" {
-		// Count unique values and find top
-		var uniqueCount int
-		p.valueCounts.Range(func(key, value interface{}) bool {
-			uniqueCount++
-			if count, ok := value.(int64); ok && int(count) > stats.Freq {
-				stats.Freq = int(count)
-				if str, ok := key.(string); ok {
-					stats.Top = str
-				}
-			}
-			return true
-		})
-		stats.Unique = uniqueCount
-
-		// For string columns, use first/last alphabetically for min/max display
-		var keys []string
-		p.valueCounts.Range(func(key, value interface{}) bool {
+func (p *HighPerformanceColumnProcessor) calculateStringStats(stats *ColumnStats) {
+	p.valueCounts.Range(func(key, value interface{}) bool {
+		if count, ok := value.(int64); ok && int(count) > stats.Freq {
+			stats.Freq = int(count)
 			if str, ok := key.(string); ok {
-				keys = append(keys, str)
+				stats.Top = str
 			}
-			return true
-		})
-
-		if len(keys) > 0 {
-			sort.Strings(keys)
-			stats.Min = keys[0]
-			stats.Max = keys[len(keys)-1]
 		}
-	}
+		return true
+	})
 
-	return stats
+	stats.Unique = p.countUniqueValues()
+	p.setStringMinMax(stats)
+}
+
+func (p *HighPerformanceColumnProcessor) countUniqueValues() int {
+	var uniqueCount int
+	p.valueCounts.Range(func(key, value interface{}) bool {
+		uniqueCount++
+		return true
+	})
+	return uniqueCount
+}
+
+func (p *HighPerformanceColumnProcessor) setStringMinMax(stats *ColumnStats) {
+	var keys []string
+	p.valueCounts.Range(func(key, value interface{}) bool {
+		if str, ok := key.(string); ok {
+			keys = append(keys, str)
+		}
+		return true
+	})
+
+	if len(keys) > 0 {
+		sort.Strings(keys)
+		stats.Min = keys[0]
+		stats.Max = keys[len(keys)-1]
+	}
 }
 
 // calculateQuantileHPP calculates the quantile value from a sorted slice (high performance version)
@@ -382,5 +453,3 @@ func calculateQuantileHPP(sortedVals []float64, quantile float64) float64 {
 	weight := index - float64(lower)
 	return sortedVals[lower]*(1-weight) + sortedVals[upper]*weight
 }
-
-

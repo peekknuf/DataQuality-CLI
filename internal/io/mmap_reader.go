@@ -10,27 +10,27 @@ import (
 
 // MMapReader provides memory-mapped file I/O for efficient large file processing
 type MMapReader struct {
-	file       *os.File
-	data       []byte
-	size       int64
-	offset     int64
-	chunkSize  int64
-	isMapped   bool
-	useMmap    bool
+	file      *os.File
+	data      []byte
+	size      int64
+	offset    int64
+	chunkSize int64
+	isMapped  bool
+	useMmap   bool
 }
 
 // MMapConfig contains configuration for memory-mapped reading
 type MMapConfig struct {
-	ChunkSize    int64  // Size of chunks to map
-	MaxMapSize   int64  // Maximum size to memory map
-	UseMmap      bool   // Whether to use memory mapping
-	FallbackSize int64  // Size for regular I/O when mmap is disabled
+	ChunkSize    int64 // Size of chunks to map
+	MaxMapSize   int64 // Maximum size to memory map
+	UseMmap      bool  // Whether to use memory mapping
+	FallbackSize int64 // Size for regular I/O when mmap is disabled
 }
 
 // DefaultMMapConfig returns a default configuration
 func DefaultMMapConfig() MMapConfig {
 	return MMapConfig{
-		ChunkSize:    64 * 1024 * 1024, // 64MB chunks
+		ChunkSize:    64 * 1024 * 1024,  // 64MB chunks
 		MaxMapSize:   512 * 1024 * 1024, // 512MB max map size
 		UseMmap:      true,
 		FallbackSize: 1024 * 1024, // 1MB for regular I/O
@@ -62,10 +62,10 @@ func NewMMapReader(filePath string, config MMapConfig) (*MMapReader, error) {
 	}
 
 	size := fileInfo.Size()
-	
+
 	// Determine if we should use memory mapping
 	useMmap := config.UseMmap && size <= config.MaxMapSize && size > 0
-	
+
 	reader := &MMapReader{
 		file:      file,
 		size:      size,

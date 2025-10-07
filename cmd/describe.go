@@ -37,7 +37,7 @@ func autoDetectSettings() (int, int) {
 		runtime.ReadMemStats(&memStats)
 		availableMemMB := int(memStats.Sys / (1024 * 1024))
 		detectedLimit := availableMemMB * 3 / 4 // 75% of available memory
-		if detectedLimit > 8192 { // Cap at 8GB
+		if detectedLimit > 8192 {               // Cap at 8GB
 			detectedLimit = 8192
 		}
 		if detectedLimit < 512 { // Minimum 512MB
@@ -46,35 +46,33 @@ func autoDetectSettings() (int, int) {
 		describeMemoryLimit = detectedLimit
 	}
 
-
-
 	return describeWorkers, describeMemoryLimit
 }
 
 type DescribeResult struct {
-	Path            string
-	RowCount        int
-	ColumnStats     []ColumnStats
-	NullPercentage  float64
-	ProcessingTime  time.Duration
-	Error           error
+	Path           string
+	RowCount       int
+	ColumnStats    []ColumnStats
+	NullPercentage float64
+	ProcessingTime time.Duration
+	Error          error
 }
 
 type ColumnStats struct {
-	Name       string
-	Type       string
-	Count      int
-	NullCount  int
-	Mean       float64
-	Std        float64
-	Min        string
-	Q25        float64
-	Q50        float64
-	Q75        float64
-	Max        string
-	Unique     int    // For string columns
-	Top        string // For string columns
-	Freq       int    // For string columns
+	Name      string
+	Type      string
+	Count     int
+	NullCount int
+	Mean      float64
+	Std       float64
+	Min       string
+	Q25       float64
+	Q50       float64
+	Q75       float64
+	Max       string
+	Unique    int    // For string columns
+	Top       string // For string columns
+	Freq      int    // For string columns
 }
 
 var describeCmd = &cobra.Command{
@@ -197,7 +195,7 @@ func processFilesParallel(files []connectors.FileMeta, workers, memoryLimit int,
 	cpuCount := runtime.NumCPU()
 	totalSize := int64(0)
 	largeFiles := 0
-	
+
 	for _, file := range files {
 		if !file.IsDir {
 			totalSize += file.Size
@@ -206,10 +204,10 @@ func processFilesParallel(files []connectors.FileMeta, workers, memoryLimit int,
 			}
 		}
 	}
-	
+
 	// Smart scaling: I/O work can benefit from more workers than CPU cores
 	actualWorkers := workers
-	
+
 	// For massive datasets, we can use more workers for I/O parallelism
 	if totalSize > 500*1024*1024 { // > 500MB total dataset
 		actualWorkers = cpuCount * 2 // 2x CPU cores for massive I/O work
@@ -217,7 +215,7 @@ func processFilesParallel(files []connectors.FileMeta, workers, memoryLimit int,
 	if largeFiles > 3 {
 		actualWorkers = cpuCount * 2 // More I/O parallelism for many huge files
 	}
-	
+
 	// Cap to reasonable limits
 	maxWorkers := cpuCount * 3 // Maximum 3x CPU cores
 	if maxWorkers > 32 {
@@ -226,7 +224,7 @@ func processFilesParallel(files []connectors.FileMeta, workers, memoryLimit int,
 	if actualWorkers > maxWorkers {
 		actualWorkers = maxWorkers
 	}
-	
+
 	semaphore := make(chan struct{}, actualWorkers)
 	results := make(chan DescribeResult, len(files))
 
@@ -286,20 +284,20 @@ func convertColumnStats(engineStats []engine.ColumnStats) []ColumnStats {
 	cmdStats := make([]ColumnStats, len(engineStats))
 	for i, stat := range engineStats {
 		cmdStats[i] = ColumnStats{
-			Name:       stat.Name,
-			Type:       stat.Type,
-			Count:      stat.Count,
-			NullCount:  stat.NullCount,
-			Mean:       stat.Mean,
-			Std:        stat.Std,
-			Min:        stat.Min,
-			Q25:        stat.Q25,
-			Q50:        stat.Q50,
-			Q75:        stat.Q75,
-			Max:        stat.Max,
-			Unique:     stat.Unique,
-			Top:        stat.Top,
-			Freq:       stat.Freq,
+			Name:      stat.Name,
+			Type:      stat.Type,
+			Count:     stat.Count,
+			NullCount: stat.NullCount,
+			Mean:      stat.Mean,
+			Std:       stat.Std,
+			Min:       stat.Min,
+			Q25:       stat.Q25,
+			Q50:       stat.Q50,
+			Q75:       stat.Q75,
+			Max:       stat.Max,
+			Unique:    stat.Unique,
+			Top:       stat.Top,
+			Freq:      stat.Freq,
 		}
 	}
 	return cmdStats
@@ -312,11 +310,11 @@ func outputResults(results []DescribeResult, totalTime time.Duration) {
 	output.WriteString("=== DATA QUALITY SUMMARY ===\n")
 	output.WriteString(fmt.Sprintf("Total files processed: %d\n", len(results)))
 	output.WriteString(fmt.Sprintf("Total processing time: %v\n", totalTime))
-	
+
 	var totalRows, totalCols int
 	var totalNulls int
 	var numericCols, stringCols int
-	
+
 	for _, result := range results {
 		if result.Error != nil {
 			log.Printf("Failed to process %s: %v", result.Path, result.Error)
@@ -325,7 +323,7 @@ func outputResults(results []DescribeResult, totalTime time.Duration) {
 		totalRows += result.RowCount
 		totalCols += len(result.ColumnStats)
 		totalNulls += int(float64(result.NullPercentage) * float64(result.RowCount*len(result.ColumnStats)) / 100.0)
-		
+
 		for _, col := range result.ColumnStats {
 			if col.Type == "int" || col.Type == "float" {
 				numericCols++
@@ -334,7 +332,7 @@ func outputResults(results []DescribeResult, totalTime time.Duration) {
 			}
 		}
 	}
-	
+
 	output.WriteString(fmt.Sprintf("Total rows processed: %d\n", totalRows))
 	output.WriteString(fmt.Sprintf("Total columns analyzed: %d\n", totalCols))
 	output.WriteString(fmt.Sprintf("Data completeness: %.1f%%\n", 100.0-(float64(totalNulls)/float64(totalRows*totalCols/len(results))*100.0)))
@@ -350,18 +348,18 @@ func outputResults(results []DescribeResult, totalTime time.Duration) {
 		if result.Error != nil {
 			continue
 		}
-		
+
 		// Extract just filename from path
 		filename := result.Path
 		if lastSlash := strings.LastIndex(filename, "/"); lastSlash >= 0 {
 			filename = filename[lastSlash+1:]
 		}
-		
+
 		// Truncate long filenames
 		if len(filename) > 37 {
 			filename = filename[:34] + "..."
 		}
-		
+
 		quality := "Good"
 		if result.NullPercentage > 10 {
 			quality = "Fair"
@@ -369,12 +367,12 @@ func outputResults(results []DescribeResult, totalTime time.Duration) {
 		if result.NullPercentage > 25 {
 			quality = "Poor"
 		}
-		
+
 		output.WriteString(fmt.Sprintf("%-40s %10d %10d %11.1f%% %11s %10s\n",
 			filename, result.RowCount, len(result.ColumnStats),
 			result.NullPercentage, result.ProcessingTime.Round(time.Millisecond), quality))
 	}
-	
+
 	output.WriteString("\n")
 
 	// Detailed analysis for files with issues (high null rates, interesting patterns)
@@ -384,20 +382,20 @@ func outputResults(results []DescribeResult, totalTime time.Duration) {
 		if result.Error != nil || detailedShown >= 3 {
 			continue
 		}
-		
+
 		// Show details for files with interesting characteristics
 		showDetails := result.NullPercentage > 5 || result.RowCount > 100000 || len(result.ColumnStats) > 20
-		
+
 		if showDetails && detailedShown < 3 {
 			filename := result.Path
 			if lastSlash := strings.LastIndex(filename, "/"); lastSlash >= 0 {
 				filename = filename[lastSlash+1:]
 			}
-			
+
 			output.WriteString(fmt.Sprintf("File: %s\n", filename))
-			output.WriteString(fmt.Sprintf("  Rows: %d | Columns: %d | Null Rate: %.1f%%\n", 
+			output.WriteString(fmt.Sprintf("  Rows: %d | Columns: %d | Null Rate: %.1f%%\n",
 				result.RowCount, len(result.ColumnStats), result.NullPercentage))
-			
+
 			// Show key insights
 			var highNullCols, numericColsWithNulls int
 			for _, col := range result.ColumnStats {
@@ -409,14 +407,14 @@ func outputResults(results []DescribeResult, totalTime time.Duration) {
 					numericColsWithNulls++
 				}
 			}
-			
+
 			if highNullCols > 0 {
 				output.WriteString(fmt.Sprintf("  ⚠️  %d columns have >10%% null values\n", highNullCols))
 			}
 			if numericColsWithNulls > 0 {
 				output.WriteString(fmt.Sprintf("  ⚠️  %d numeric columns contain nulls\n", numericColsWithNulls))
 			}
-			
+
 			// Show sample of interesting columns
 			interestingCols := 0
 			output.WriteString("  Key columns:\n")

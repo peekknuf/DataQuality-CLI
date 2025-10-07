@@ -23,20 +23,20 @@ type SimpleEngine struct {
 
 // ColumnStats represents pandas.describe() style statistics for a column
 type ColumnStats struct {
-	Name       string
-	Type       string // "int", "float", "string", "datetime"
-	Count      int
-	NullCount  int
-	Mean       float64
-	Std        float64
-	Min        string
-	Q25        float64
-	Q50        float64
-	Q75        float64
-	Max        string
-	Unique     int    // For string columns
-	Top        string // For string columns
-	Freq       int    // For string columns
+	Name      string
+	Type      string // "int", "float", "string", "datetime"
+	Count     int
+	NullCount int
+	Mean      float64
+	Std       float64
+	Min       string
+	Q25       float64
+	Q50       float64
+	Q75       float64
+	Max       string
+	Unique    int    // For string columns
+	Top       string // For string columns
+	Freq      int    // For string columns
 }
 
 // DescribeResult contains the complete analysis results

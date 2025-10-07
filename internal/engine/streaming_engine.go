@@ -23,18 +23,18 @@ func NewStreamingEngine(filePath string) *StreamingEngine {
 
 // SimpleStats for ultra-fast processing
 type SimpleStats struct {
-	Name         string
-	Count        int
-	NullCount    int
-	Type         string // "numeric", "float", or "string"
-	Min          string
-	Max          string
-	Unique       int    // Actual unique count
-	Top          string // Most frequent value
-	Freq         int    // Frequency of top value
-	SampleSum    int64  // For simple mean calculation
-	SampleCount  int    // Number of values in sample
-	HasFloat     bool   // Track if we've seen float values
+	Name        string
+	Count       int
+	NullCount   int
+	Type        string // "numeric", "float", or "string"
+	Min         string
+	Max         string
+	Unique      int    // Actual unique count
+	Top         string // Most frequent value
+	Freq        int    // Frequency of top value
+	SampleSum   int64  // For simple mean calculation
+	SampleCount int    // Number of values in sample
+	HasFloat    bool   // Track if we've seen float values
 }
 
 // Describe processes CSV with streaming approach - minimal memory, maximum speed
@@ -45,43 +45,60 @@ func (e *StreamingEngine) Describe() *DescribeResult {
 		Path: e.FilePath,
 	}
 
-	// Open file for streaming
-	file, err := os.Open(e.FilePath)
+	file, scanner, headers, err := e.setupStreamingScanner()
 	if err != nil {
-		result.Error = fmt.Errorf("failed to open file: %v", err)
+		result.Error = err
 		return result
 	}
 	defer file.Close()
 
-	// Create buffered scanner for maximum speed
-	scanner := bufio.NewScanner(file)
-	if !scanner.Scan() {
-		result.Error = fmt.Errorf("failed to read headers: %v", scanner.Err())
-		return result
-	}
-
-	// Parse headers with simple split
-	headerLine := scanner.Text()
-	headers := strings.Split(headerLine, ",")
 	if len(headers) == 0 {
 		result.Error = fmt.Errorf("no columns found in file")
 		return result
 	}
 
-	// Initialize simple stats for each column
+	stats := e.initializeSimpleStats(headers)
+	rowCount := e.processStreamingRows(scanner, stats)
+	result.ColumnStats, result.RowCount = e.convertStreamingResults(stats, rowCount, len(headers))
+
+	result.NullPercentage = e.calculateStreamingNullPercentage(result.ColumnStats, result.RowCount, len(headers))
+	result.ProcessingTime = time.Since(startTime)
+
+	return result
+}
+
+func (e *StreamingEngine) setupStreamingScanner() (*os.File, *bufio.Scanner, []string, error) {
+	file, err := os.Open(e.FilePath)
+	if err != nil {
+		return nil, nil, nil, fmt.Errorf("failed to open file: %v", err)
+	}
+
+	scanner := bufio.NewScanner(file)
+	if !scanner.Scan() {
+		return nil, nil, nil, fmt.Errorf("failed to read headers: %v", scanner.Err())
+	}
+
+	headerLine := scanner.Text()
+	headers := strings.Split(headerLine, ",")
+	return file, scanner, headers, nil
+}
+
+func (e *StreamingEngine) initializeSimpleStats(headers []string) []*SimpleStats {
 	stats := make([]*SimpleStats, len(headers))
 	for i, header := range headers {
 		stats[i] = &SimpleStats{
 			Name:        strings.TrimSpace(header),
-			Min:         "~", // Placeholder
-			Max:         "~", // Placeholder
+			Min:         "~",
+			Max:         "~",
 			SampleSum:   0,
 			SampleCount: 0,
 			HasFloat:    false,
 		}
 	}
+	return stats
+}
 
-	// Process rows in streaming fashion
+func (e *StreamingEngine) processStreamingRows(scanner *bufio.Scanner, stats []*SimpleStats) int {
 	rowCount := 0
 	for scanner.Scan() {
 		line := scanner.Text()
@@ -89,122 +106,149 @@ func (e *StreamingEngine) Describe() *DescribeResult {
 			continue
 		}
 
-		// Simple CSV split - fast but not perfectly robust
 		values := strings.Split(line, ",")
-		
-		// Process each column
-		for i, value := range values {
-			if i >= len(stats) {
-				break
-			}
-			
-			trimmed := strings.TrimSpace(value)
-			stats[i].Count++
-			
-			if trimmed == "" {
-				stats[i].NullCount++
-				continue
-			}
-			
-			// Enhanced type detection - try int first, then float
-			if stats[i].Type == "" {
-				if _, err := strconv.ParseInt(trimmed, 10, 64); err == nil {
-					stats[i].Type = "int"
-				} else if _, err := strconv.ParseFloat(trimmed, 64); err == nil {
-					stats[i].Type = "float"
-					stats[i].HasFloat = true
-				} else {
-					stats[i].Type = "string"
-				}
-			}
-			
-			// Simple min/max tracking
-			if stats[i].Min == "~" || trimmed < stats[i].Min {
-				stats[i].Min = trimmed
-			}
-			if stats[i].Max == "~" || trimmed > stats[i].Max {
-				stats[i].Max = trimmed
-			}
-			
-			// Enhanced frequency tracking for top value
-			// For performance, only track this for a sample of values
-			if rowCount%100 == 0 || rowCount < 1000 {
-				if trimmed == stats[i].Top {
-					stats[i].Freq++
-				} else if stats[i].Freq == 0 || rowCount%1000 == 0 {
-					// Reset tracking periodically to catch different patterns
-					stats[i].Top = trimmed
-					stats[i].Freq = 1
-				}
-			}
-			
-			// Enhanced sampling for mean (sample every 10th value, plus first 1000)
-			if (rowCount < 1000 || rowCount%10 == 0) && (stats[i].Type == "int" || stats[i].Type == "float") {
-				if val, err := strconv.ParseInt(trimmed, 10, 64); err == nil {
-					stats[i].SampleSum += val
-					stats[i].SampleCount++
-				} else if stats[i].HasFloat {
-					if val, err := strconv.ParseFloat(trimmed, 64); err == nil {
-						stats[i].SampleSum += int64(val * 100) // Store float as int*100 for precision
-						stats[i].SampleCount++
-					}
-				}
-			}
-		}
+		e.processStreamingRow(values, stats, rowCount)
 		rowCount++
 	}
+	return rowCount
+}
 
-	// Convert to output format with enhanced statistics
-	result.ColumnStats = make([]ColumnStats, len(stats))
+func (e *StreamingEngine) processStreamingRow(values []string, stats []*SimpleStats, rowCount int) {
+	for i, value := range values {
+		if i >= len(stats) {
+			break
+		}
+
+		trimmed := strings.TrimSpace(value)
+		stats[i].Count++
+
+		if trimmed == "" {
+			stats[i].NullCount++
+			continue
+		}
+
+		e.detectStreamingType(stats[i], trimmed)
+		e.updateStreamingMinMax(stats[i], trimmed)
+		e.updateStreamingFrequency(stats[i], trimmed, rowCount)
+		e.updateStreamingSample(stats[i], trimmed, rowCount)
+	}
+}
+
+func (e *StreamingEngine) detectStreamingType(stat *SimpleStats, value string) {
+	if stat.Type != "" {
+		return
+	}
+
+	if _, err := strconv.ParseInt(value, 10, 64); err == nil {
+		stat.Type = "int"
+	} else if _, err := strconv.ParseFloat(value, 64); err == nil {
+		stat.Type = "float"
+		stat.HasFloat = true
+	} else {
+		stat.Type = "string"
+	}
+}
+
+func (e *StreamingEngine) updateStreamingMinMax(stat *SimpleStats, value string) {
+	if stat.Min == "~" || value < stat.Min {
+		stat.Min = value
+	}
+	if stat.Max == "~" || value > stat.Max {
+		stat.Max = value
+	}
+}
+
+func (e *StreamingEngine) updateStreamingFrequency(stat *SimpleStats, value string, rowCount int) {
+	if rowCount%100 == 0 || rowCount < 1000 {
+		if value == stat.Top {
+			stat.Freq++
+		} else if stat.Freq == 0 || rowCount%1000 == 0 {
+			stat.Top = value
+			stat.Freq = 1
+		}
+	}
+}
+
+func (e *StreamingEngine) updateStreamingSample(stat *SimpleStats, value string, rowCount int) {
+	if (rowCount < 1000 || rowCount%10 == 0) && (stat.Type == "int" || stat.Type == "float") {
+		if val, err := strconv.ParseInt(value, 10, 64); err == nil {
+			stat.SampleSum += val
+			stat.SampleCount++
+		} else if stat.HasFloat {
+			if val, err := strconv.ParseFloat(value, 64); err == nil {
+				stat.SampleSum += int64(val * 100)
+				stat.SampleCount++
+			}
+		}
+	}
+}
+
+func (e *StreamingEngine) convertStreamingResults(stats []*SimpleStats, rowCount int, headerCount int) ([]ColumnStats, int) {
+	columnStats := make([]ColumnStats, len(stats))
 	var totalNulls int
 
 	for i, stat := range stats {
-		colStat := ColumnStats{
-			Name:      stat.Name,
-			Count:     stat.Count,
-			NullCount: stat.NullCount,
-			Type:      stat.Type,
-			Min:       stat.Min,
-			Max:       stat.Max,
-		}
-		
-		// Better unique count estimation based on data type
-		if stat.Type == "string" {
-			// For strings, estimate based on variety
-			colStat.Unique = stat.Count / 5 // More variety expected
-			if colStat.Unique > stat.Count {
-				colStat.Unique = stat.Count
-			}
-		} else {
-			// For numeric, assume less variety
-			colStat.Unique = stat.Count / 20
-			if colStat.Unique < 10 {
-				colStat.Unique = 10 // Minimum variety for numeric
-			}
-		}
-		
-		// Enhanced mean calculation
-		if stat.SampleCount > 0 && (stat.Type == "int" || stat.Type == "float") {
-			if stat.HasFloat {
-				colStat.Mean = float64(stat.SampleSum) / float64(stat.SampleCount) / 100.0 // Convert back from int*100
-			} else {
-				colStat.Mean = float64(stat.SampleSum) / float64(stat.SampleCount)
-			}
-		}
-		
-		// Set top value and frequency
-		colStat.Top = stat.Top
-		colStat.Freq = stat.Freq
-		
-		result.ColumnStats[i] = colStat
+		colStat := e.createStreamingColumnStat(stat)
+		columnStats[i] = colStat
 		totalNulls += stat.NullCount
 	}
 
-	result.RowCount = rowCount
-	if result.RowCount > 0 {
-		result.NullPercentage = float64(totalNulls) / float64(result.RowCount*len(headers)) * 100
-	}
-	result.ProcessingTime = time.Since(startTime)
+	return columnStats, totalNulls
+}
 
-	return result
+func (e *StreamingEngine) createStreamingColumnStat(stat *SimpleStats) ColumnStats {
+	colStat := ColumnStats{
+		Name:      stat.Name,
+		Count:     stat.Count,
+		NullCount: stat.NullCount,
+		Type:      stat.Type,
+		Min:       stat.Min,
+		Max:       stat.Max,
+		Top:       stat.Top,
+		Freq:      stat.Freq,
+	}
+
+	colStat.Unique = e.estimateStreamingUniqueCount(stat)
+	e.calculateStreamingMean(&colStat, stat)
+
+	return colStat
+}
+
+func (e *StreamingEngine) estimateStreamingUniqueCount(stat *SimpleStats) int {
+	if stat.Type == "string" {
+		colStat := stat.Count / 5
+		if colStat > stat.Count {
+			return stat.Count
+		}
+		return colStat
+	}
+
+	colStat := stat.Count / 20
+	if colStat < 10 {
+		return 10
+	}
+	return colStat
+}
+
+func (e *StreamingEngine) calculateStreamingMean(colStat *ColumnStats, stat *SimpleStats) {
+	if stat.SampleCount > 0 && (stat.Type == "int" || stat.Type == "float") {
+		if stat.HasFloat {
+			colStat.Mean = float64(stat.SampleSum) / float64(stat.SampleCount) / 100.0
+		} else {
+			colStat.Mean = float64(stat.SampleSum) / float64(stat.SampleCount)
+		}
+	}
+}
+
+func (e *StreamingEngine) calculateStreamingNullPercentage(columnStats []ColumnStats, rowCount int, headerCount int) float64 {
+	if rowCount == 0 {
+		return 0
+	}
+
+	var totalNulls int
+	for _, stats := range columnStats {
+		totalNulls += stats.NullCount
+	}
+
+	return float64(totalNulls) / float64(rowCount*headerCount) * 100
 }

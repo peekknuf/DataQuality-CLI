@@ -140,24 +140,24 @@ func (q *StealQueue) Steal() (Task, bool) {
 
 // WorkStealingScheduler implements a work-stealing scheduler
 type WorkStealingScheduler struct {
-	workers      []*Worker
-	queues       []*StealQueue
-	globalQueue  *WorkQueue
-	resultChan   chan TaskResult
-	quit         chan bool
-	wg           sync.WaitGroup
-	processor    TaskProcessor
-	stats        *SchedulerStats
-	config       SchedulerConfig
+	workers     []*Worker
+	queues      []*StealQueue
+	globalQueue *WorkQueue
+	resultChan  chan TaskResult
+	quit        chan bool
+	wg          sync.WaitGroup
+	processor   TaskProcessor
+	stats       *SchedulerStats
+	config      SchedulerConfig
 }
 
 // SchedulerConfig contains configuration for the scheduler
 type SchedulerConfig struct {
-	NumWorkers     int           // Number of worker goroutines
-	QueueSize      int           // Size of per-worker queues
-	StealInterval  time.Duration // Interval between steal attempts
-	MaxStealAttempts int         // Maximum steal attempts per interval
-	LoadBalance    bool          // Enable load balancing
+	NumWorkers       int           // Number of worker goroutines
+	QueueSize        int           // Size of per-worker queues
+	StealInterval    time.Duration // Interval between steal attempts
+	MaxStealAttempts int           // Maximum steal attempts per interval
+	LoadBalance      bool          // Enable load balancing
 }
 
 // DefaultSchedulerConfig returns a default configuration
@@ -173,15 +173,15 @@ func DefaultSchedulerConfig() SchedulerConfig {
 
 // SchedulerStats contains statistics for the scheduler
 type SchedulerStats struct {
-	TasksSubmitted    int64
-	TasksCompleted    int64
-	TasksFailed       int64
-	StealAttempts     int64
-	StealSuccesses    int64
-	TotalRuntime      time.Duration
-	ActiveWorkers     int32
-	StartTime         time.Time
-	mu                sync.Mutex
+	TasksSubmitted int64
+	TasksCompleted int64
+	TasksFailed    int64
+	StealAttempts  int64
+	StealSuccesses int64
+	TotalRuntime   time.Duration
+	ActiveWorkers  int32
+	StartTime      time.Time
+	mu             sync.Mutex
 }
 
 // NewWorkStealingScheduler creates a new work-stealing scheduler
@@ -214,7 +214,7 @@ func NewWorkStealingScheduler(processor TaskProcessor, config SchedulerConfig) *
 	for i := 0; i < config.NumWorkers; i++ {
 		queue := &StealQueue{NewWorkQueue()}
 		scheduler.queues[i] = queue
-		
+
 		worker := &Worker{
 			id:         i,
 			queue:      make(chan Task, config.QueueSize),
@@ -260,7 +260,7 @@ func (s *WorkStealingScheduler) Submit(task Task) error {
 		// Find the least loaded worker
 		minQueueSize := int(^uint(0) >> 1) // Max int
 		targetWorker := 0
-		
+
 		for i, queue := range s.queues {
 			queueSize := queue.Size()
 			if queueSize < minQueueSize {
@@ -290,11 +290,11 @@ func (s *WorkStealingScheduler) Results() <-chan TaskResult {
 func (s *WorkStealingScheduler) Stats() SchedulerStats {
 	s.stats.mu.Lock()
 	defer s.stats.mu.Unlock()
-	
+
 	stats := *s.stats
 	stats.TotalRuntime = time.Since(s.stats.StartTime)
 	stats.ActiveWorkers = atomic.LoadInt32(&s.stats.ActiveWorkers)
-	
+
 	return stats
 }
 
@@ -364,11 +364,11 @@ func (s *WorkStealingScheduler) stealTask(workerID int) Task {
 // executeTask executes a task and sends the result
 func (s *WorkStealingScheduler) executeTask(worker *Worker, task Task) {
 	start := time.Now()
-	
+
 	result, err := s.processor.Process(task)
-	
+
 	duration := time.Since(start)
-	
+
 	// Update worker stats
 	worker.stats.mu.Lock()
 	worker.stats.TasksProcessed++
@@ -467,7 +467,7 @@ func NewPipelineProcessor(stages ...PipelineStage) *PipelineProcessor {
 // Process processes data through all pipeline stages
 func (p *PipelineProcessor) Process(task Task) (interface{}, error) {
 	data := interface{}(task)
-	
+
 	for _, stage := range p.stages {
 		result, err := stage.Process(data)
 		if err != nil {
@@ -475,7 +475,7 @@ func (p *PipelineProcessor) Process(task Task) (interface{}, error) {
 		}
 		data = result
 	}
-	
+
 	return data, nil
 }
 
@@ -503,13 +503,13 @@ func (p *BatchProcessor) Process(task Task) (interface{}, error) {
 // ProcessBatch processes a batch of tasks
 func (p *BatchProcessor) ProcessBatch(tasks []Task) ([]TaskResult, error) {
 	results := make([]TaskResult, len(tasks))
-	
+
 	var wg sync.WaitGroup
 	for i, task := range tasks {
 		wg.Add(1)
 		go func(index int, t Task) {
 			defer wg.Done()
-			
+
 			result, err := p.processor.Process(t)
 			results[index] = TaskResult{
 				TaskID: t.ID(),
@@ -518,7 +518,7 @@ func (p *BatchProcessor) ProcessBatch(tasks []Task) ([]TaskResult, error) {
 			}
 		}(i, task)
 	}
-	
+
 	wg.Wait()
 	return results, nil
 }

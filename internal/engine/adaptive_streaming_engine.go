@@ -31,22 +31,22 @@ type FileStats struct {
 
 // AdaptiveStats for size-aware processing
 type AdaptiveStats struct {
-	Name         string
-	Count        int
-	NullCount    int
-	Type         string
-	Min          string
-	Max          string
-	Unique       int
-	Top          string
-	Freq         int
-	SampleSum    int64
-	SampleCount  int
-	HasFloat     bool
-	
+	Name        string
+	Count       int
+	NullCount   int
+	Type        string
+	Min         string
+	Max         string
+	Unique      int
+	Top         string
+	Freq        int
+	SampleSum   int64
+	SampleCount int
+	HasFloat    bool
+
 	// Adaptive sampling
-	SampleRate   int  // Sample every Nth row for large files
-	MaxSamples   int  // Maximum samples to collect
+	SampleRate int // Sample every Nth row for large files
+	MaxSamples int // Maximum samples to collect
 }
 
 // getFileStats determines optimal processing strategy based on file size
@@ -55,14 +55,14 @@ func getFileStats(filePath string) (FileStats, error) {
 	if err != nil {
 		return FileStats{}, err
 	}
-	
+
 	size := fileInfo.Size()
-	
+
 	// Determine strategy based on file size
 	var strategy string
-	isLarge := size > 10*1024*1024  // > 10MB
-	isHuge := size > 50*1024*1024   // > 50MB
-	
+	isLarge := size > 10*1024*1024 // > 10MB
+	isHuge := size > 50*1024*1024  // > 50MB
+
 	if isHuge {
 		strategy = "memory-efficient"
 	} else if isLarge {
@@ -70,7 +70,7 @@ func getFileStats(filePath string) (FileStats, error) {
 	} else {
 		strategy = "standard"
 	}
-	
+
 	return FileStats{
 		Size:     size,
 		IsLarge:  isLarge,
@@ -87,62 +87,75 @@ func (e *AdaptiveStreamingEngine) Describe() *DescribeResult {
 		Path: e.FilePath,
 	}
 
-	// Get file stats for adaptive processing
 	fileStats, err := getFileStats(e.FilePath)
 	if err != nil {
 		result.Error = fmt.Errorf("failed to get file stats: %v", err)
 		return result
 	}
 
-	// Open file with appropriate buffer size
-	file, err := os.Open(e.FilePath)
+	file, scanner, headers, err := e.setupFileScanner(fileStats)
 	if err != nil {
-		result.Error = fmt.Errorf("failed to open file: %v", err)
+		result.Error = err
 		return result
 	}
 	defer file.Close()
 
-	// Adaptive buffer size based on file size
-	bufferSize := 64 * 1024 // 64KB default
-	if fileStats.IsLarge {
-		bufferSize = 256 * 1024 // 256KB for large files
-	}
-	if fileStats.IsHuge {
-		bufferSize = 1024 * 1024 // 1MB for huge files
-	}
-
-	scanner := bufio.NewScanner(file)
-	buf := make([]byte, bufferSize)
-	scanner.Buffer(buf, 10*1024*1024) // Set max token size to 10MB
-
-	// Read headers
-	if !scanner.Scan() {
-		result.Error = fmt.Errorf("failed to read headers: %v", scanner.Err())
-		return result
-	}
-
-	headerLine := scanner.Text()
-	headers := strings.Split(headerLine, ",")
 	if len(headers) == 0 {
 		result.Error = fmt.Errorf("no columns found in file")
 		return result
 	}
 
-	// Initialize adaptive stats with sampling parameters
+	stats := e.initializeStats(headers, fileStats)
+	rowCount := e.processRows(scanner, stats, fileStats)
+	result.ColumnStats, result.RowCount = e.convertToResult(stats, rowCount, len(headers), fileStats)
+
+	var totalNulls int
+	for _, stat := range stats {
+		totalNulls += stat.NullCount
+	}
+
+	if result.RowCount > 0 {
+		result.NullPercentage = float64(totalNulls) / float64(result.RowCount*len(headers)) * 100
+	}
+	result.ProcessingTime = time.Since(startTime)
+
+	return result
+}
+
+func (e *AdaptiveStreamingEngine) setupFileScanner(fileStats FileStats) (*os.File, *bufio.Scanner, []string, error) {
+	file, err := os.Open(e.FilePath)
+	if err != nil {
+		return nil, nil, nil, fmt.Errorf("failed to open file: %v", err)
+	}
+
+	bufferSize := e.getAdaptiveBufferSize(fileStats)
+	scanner := bufio.NewScanner(file)
+	buf := make([]byte, bufferSize)
+	scanner.Buffer(buf, 10*1024*1024)
+
+	if !scanner.Scan() {
+		return nil, nil, nil, fmt.Errorf("failed to read headers: %v", scanner.Err())
+	}
+
+	headerLine := scanner.Text()
+	headers := strings.Split(headerLine, ",")
+	return file, scanner, headers, nil
+}
+
+func (e *AdaptiveStreamingEngine) getAdaptiveBufferSize(fileStats FileStats) int {
+	if fileStats.IsHuge {
+		return 1024 * 1024 // 1MB for huge files
+	}
+	if fileStats.IsLarge {
+		return 256 * 1024 // 256KB for large files
+	}
+	return 64 * 1024 // 64KB default
+}
+
+func (e *AdaptiveStreamingEngine) initializeStats(headers []string, fileStats FileStats) []*AdaptiveStats {
 	stats := make([]*AdaptiveStats, len(headers))
 	for i, header := range headers {
-		sampleRate := 1
-		maxSamples := 10000
-		
-		if fileStats.IsLarge {
-			sampleRate = 10  // Sample every 10th row
-			maxSamples = 5000
-		}
-		if fileStats.IsHuge {
-			sampleRate = 50  // Sample every 50th row for huge files
-			maxSamples = 2000
-		}
-		
+		sampleRate, maxSamples := e.getSamplingParameters(fileStats)
 		stats[i] = &AdaptiveStats{
 			Name:        strings.TrimSpace(header),
 			Min:         "~",
@@ -154,8 +167,20 @@ func (e *AdaptiveStreamingEngine) Describe() *DescribeResult {
 			MaxSamples:  maxSamples,
 		}
 	}
+	return stats
+}
 
-	// Process rows with adaptive sampling
+func (e *AdaptiveStreamingEngine) getSamplingParameters(fileStats FileStats) (int, int) {
+	if fileStats.IsHuge {
+		return 50, 2000 // Sample every 50th row, max 2000 samples
+	}
+	if fileStats.IsLarge {
+		return 10, 5000 // Sample every 10th row, max 5000 samples
+	}
+	return 1, 10000 // Sample every row, max 10000 samples
+}
+
+func (e *AdaptiveStreamingEngine) processRows(scanner *bufio.Scanner, stats []*AdaptiveStats, fileStats FileStats) int {
 	rowCount := 0
 	for scanner.Scan() {
 		line := scanner.Text()
@@ -164,147 +189,171 @@ func (e *AdaptiveStreamingEngine) Describe() *DescribeResult {
 		}
 
 		values := strings.Split(line, ",")
-		
-		// Process each column with adaptive sampling
-		for i, value := range values {
-			if i >= len(stats) {
-				break
-			}
-			
-			// Always count rows, but sample statistics based on strategy
-			stats[i].Count++
-			
-			trimmed := strings.TrimSpace(value)
-			if trimmed == "" {
-				stats[i].NullCount++
-				continue
-			}
-			
-			// Enhanced type detection
-			if stats[i].Type == "" {
-				if _, err := strconv.ParseInt(trimmed, 10, 64); err == nil {
-					stats[i].Type = "int"
-				} else if _, err := strconv.ParseFloat(trimmed, 64); err == nil {
-					stats[i].Type = "float"
-					stats[i].HasFloat = true
-				} else {
-					stats[i].Type = "string"
-				}
-			}
-			
-			// Min/max tracking (always done)
-			if stats[i].Min == "~" || trimmed < stats[i].Min {
-				stats[i].Min = trimmed
-			}
-			if stats[i].Max == "~" || trimmed > stats[i].Max {
-				stats[i].Max = trimmed
-			}
-			
-			// Adaptive sampling for statistics
-			shouldSample := rowCount%stats[i].SampleRate == 0 || 
-								rowCount < 1000 || 
-								stats[i].SampleCount < stats[i].MaxSamples
-			
-			if shouldSample {
-				// Enhanced frequency tracking (less frequent for large files)
-				freqCheckRate := 1
-				if fileStats.IsLarge {
-					freqCheckRate = 100
-				}
-				if fileStats.IsHuge {
-					freqCheckRate = 500
-				}
-				
-				if rowCount%freqCheckRate == 0 || rowCount < 1000 {
-					if trimmed == stats[i].Top {
-						stats[i].Freq++
-					} else if stats[i].Freq == 0 || rowCount%1000 == 0 {
-						stats[i].Top = trimmed
-						stats[i].Freq = 1
-					}
-				}
-				
-				// Sampling for mean calculation
-				if stats[i].Type == "int" || stats[i].Type == "float" {
-					if val, err := strconv.ParseInt(trimmed, 10, 64); err == nil {
-						stats[i].SampleSum += val
-						stats[i].SampleCount++
-					} else if stats[i].HasFloat {
-						if val, err := strconv.ParseFloat(trimmed, 64); err == nil {
-							stats[i].SampleSum += int64(val * 100)
-							stats[i].SampleCount++
-						}
-					}
-				}
-			}
-		}
+		e.processRow(values, stats, rowCount, fileStats)
 		rowCount++
 	}
+	return rowCount
+}
 
-	// Convert to output format with enhanced statistics
-	result.ColumnStats = make([]ColumnStats, len(stats))
+func (e *AdaptiveStreamingEngine) processRow(values []string, stats []*AdaptiveStats, rowCount int, fileStats FileStats) {
+	for i, value := range values {
+		if i >= len(stats) {
+			break
+		}
+
+		stats[i].Count++
+		trimmed := strings.TrimSpace(value)
+		if trimmed == "" {
+			stats[i].NullCount++
+			continue
+		}
+
+		e.detectDataType(stats[i], trimmed)
+		e.updateMinMax(stats[i], trimmed)
+
+		if e.shouldSample(stats[i], rowCount) {
+			e.updateFrequency(stats[i], trimmed, rowCount, fileStats)
+			e.updateSampleSum(stats[i], trimmed)
+		}
+	}
+}
+
+func (e *AdaptiveStreamingEngine) detectDataType(stat *AdaptiveStats, value string) {
+	if stat.Type != "" {
+		return
+	}
+
+	if _, err := strconv.ParseInt(value, 10, 64); err == nil {
+		stat.Type = "int"
+	} else if _, err := strconv.ParseFloat(value, 64); err == nil {
+		stat.Type = "float"
+		stat.HasFloat = true
+	} else {
+		stat.Type = "string"
+	}
+}
+
+func (e *AdaptiveStreamingEngine) updateMinMax(stat *AdaptiveStats, value string) {
+	if stat.Min == "~" || value < stat.Min {
+		stat.Min = value
+	}
+	if stat.Max == "~" || value > stat.Max {
+		stat.Max = value
+	}
+}
+
+func (e *AdaptiveStreamingEngine) shouldSample(stat *AdaptiveStats, rowCount int) bool {
+	return rowCount%stat.SampleRate == 0 ||
+		rowCount < 1000 ||
+		stat.SampleCount < stat.MaxSamples
+}
+
+func (e *AdaptiveStreamingEngine) updateFrequency(stat *AdaptiveStats, value string, rowCount int, fileStats FileStats) {
+	freqCheckRate := e.getFrequencyCheckRate(fileStats)
+	if rowCount%freqCheckRate == 0 || rowCount < 1000 {
+		if value == stat.Top {
+			stat.Freq++
+		} else if stat.Freq == 0 || rowCount%1000 == 0 {
+			stat.Top = value
+			stat.Freq = 1
+		}
+	}
+}
+
+func (e *AdaptiveStreamingEngine) getFrequencyCheckRate(fileStats FileStats) int {
+	if fileStats.IsHuge {
+		return 500
+	}
+	if fileStats.IsLarge {
+		return 100
+	}
+	return 1
+}
+
+func (e *AdaptiveStreamingEngine) updateSampleSum(stat *AdaptiveStats, value string) {
+	if stat.Type != "int" && stat.Type != "float" {
+		return
+	}
+
+	if val, err := strconv.ParseInt(value, 10, 64); err == nil {
+		stat.SampleSum += val
+		stat.SampleCount++
+	} else if stat.HasFloat {
+		if val, err := strconv.ParseFloat(value, 64); err == nil {
+			stat.SampleSum += int64(val * 100)
+			stat.SampleCount++
+		}
+	}
+}
+
+func (e *AdaptiveStreamingEngine) convertToResult(stats []*AdaptiveStats, rowCount int, headerCount int, fileStats FileStats) ([]ColumnStats, int) {
+	columnStats := make([]ColumnStats, len(stats))
 	var totalNulls int
 
 	for i, stat := range stats {
-		colStat := ColumnStats{
-			Name:      stat.Name,
-			Count:     stat.Count,
-			NullCount: stat.NullCount,
-			Type:      stat.Type,
-			Min:       stat.Min,
-			Max:       stat.Max,
-		}
-		
-		// Improved unique count estimation based on sampling
-		if stat.Type == "string" {
-			// For strings, estimate based on file size and sampling
-			if fileStats.IsHuge {
-				colStat.Unique = stat.Count / 100 // Very sparse sampling for huge files
-			} else if fileStats.IsLarge {
-				colStat.Unique = stat.Count / 25
-			} else {
-				colStat.Unique = stat.Count / 10
-			}
-		} else {
-			// For numeric, assume less variety
-			if fileStats.IsHuge {
-				colStat.Unique = stat.Count / 500
-			} else if fileStats.IsLarge {
-				colStat.Unique = stat.Count / 100
-			} else {
-				colStat.Unique = stat.Count / 50
-			}
-		}
-		
-		// Ensure minimum unique counts
-		if colStat.Unique < 1 {
-			colStat.Unique = 1
-		}
-		if stat.Type != "string" && colStat.Unique < 10 {
-			colStat.Unique = 10
-		}
-		
-		// Enhanced mean calculation
-		if stat.SampleCount > 0 && (stat.Type == "int" || stat.Type == "float") {
-			if stat.HasFloat {
-				colStat.Mean = float64(stat.SampleSum) / float64(stat.SampleCount) / 100.0
-			} else {
-				colStat.Mean = float64(stat.SampleSum) / float64(stat.SampleCount)
-			}
-		}
-		
-		colStat.Top = stat.Top
-		colStat.Freq = stat.Freq
-		
-		result.ColumnStats[i] = colStat
+		colStat := e.createColumnStat(stat, fileStats)
+		columnStats[i] = colStat
 		totalNulls += stat.NullCount
 	}
 
-	result.RowCount = rowCount
-	if result.RowCount > 0 {
-		result.NullPercentage = float64(totalNulls) / float64(result.RowCount*len(headers)) * 100
-	}
-	result.ProcessingTime = time.Since(startTime)
+	return columnStats, rowCount
+}
 
-	return result
+func (e *AdaptiveStreamingEngine) createColumnStat(stat *AdaptiveStats, fileStats FileStats) ColumnStats {
+	colStat := ColumnStats{
+		Name:      stat.Name,
+		Count:     stat.Count,
+		NullCount: stat.NullCount,
+		Type:      stat.Type,
+		Min:       stat.Min,
+		Max:       stat.Max,
+		Top:       stat.Top,
+		Freq:      stat.Freq,
+	}
+
+	colStat.Unique = e.estimateUniqueCount(stat, fileStats)
+	e.ensureMinimumUniqueCounts(&colStat, stat)
+
+	if stat.SampleCount > 0 && (stat.Type == "int" || stat.Type == "float") {
+		colStat.Mean = e.calculateMean(stat)
+	}
+
+	return colStat
+}
+
+func (e *AdaptiveStreamingEngine) estimateUniqueCount(stat *AdaptiveStats, fileStats FileStats) int {
+	if stat.Type == "string" {
+		if fileStats.IsHuge {
+			return stat.Count / 100
+		}
+		if fileStats.IsLarge {
+			return stat.Count / 25
+		}
+		return stat.Count / 10
+	}
+
+	// For numeric types
+	if fileStats.IsHuge {
+		return stat.Count / 500
+	}
+	if fileStats.IsLarge {
+		return stat.Count / 100
+	}
+	return stat.Count / 50
+}
+
+func (e *AdaptiveStreamingEngine) ensureMinimumUniqueCounts(colStat *ColumnStats, stat *AdaptiveStats) {
+	if colStat.Unique < 1 {
+		colStat.Unique = 1
+	}
+	if stat.Type != "string" && colStat.Unique < 10 {
+		colStat.Unique = 10
+	}
+}
+
+func (e *AdaptiveStreamingEngine) calculateMean(stat *AdaptiveStats) float64 {
+	if stat.HasFloat {
+		return float64(stat.SampleSum) / float64(stat.SampleCount) / 100.0
+	}
+	return float64(stat.SampleSum) / float64(stat.SampleCount)
 }

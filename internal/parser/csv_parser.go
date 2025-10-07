@@ -21,14 +21,14 @@ const (
 
 // ParserConfig contains configuration options for the CSV parser
 type ParserConfig struct {
-	Delimiter    rune  // Field delimiter (comma, semicolon, tab)
-	Quote        rune  // Quote character
-	Escape       rune  // Escape character
-	ChunkSize    int   // Size of processing chunks
-	BufferSize   int   // Size of internal buffer
-	TrimSpace    bool  // Whether to trim leading/trailing whitespace
-	Headers      bool  // Whether first row contains headers
-	MaxFieldSize int   // Maximum field size to prevent memory exhaustion
+	Delimiter    rune // Field delimiter (comma, semicolon, tab)
+	Quote        rune // Quote character
+	Escape       rune // Escape character
+	ChunkSize    int  // Size of processing chunks
+	BufferSize   int  // Size of internal buffer
+	TrimSpace    bool // Whether to trim leading/trailing whitespace
+	Headers      bool // Whether first row contains headers
+	MaxFieldSize int  // Maximum field size to prevent memory exhaustion
 }
 
 // DefaultParserConfig returns a default configuration for the CSV parser
@@ -37,7 +37,7 @@ func DefaultParserConfig() ParserConfig {
 		Delimiter:    ',',
 		Quote:        '"',
 		Escape:       '"',
-		ChunkSize:    64 * 1024, // 64KB chunks
+		ChunkSize:    64 * 1024,   // 64KB chunks
 		BufferSize:   1024 * 1024, // 1MB buffer
 		TrimSpace:    true,
 		Headers:      true,
@@ -48,16 +48,16 @@ func DefaultParserConfig() ParserConfig {
 // CSVParser is a high-performance, zero-allocation CSV parser
 type CSVParser struct {
 	config     ParserConfig
-	buffer     []byte          // Reusable buffer
-	data       []byte          // Current data being parsed
-	pos        int             // Current position in data
-	state      ParseState      // Current parsing state
-	fieldStart int             // Start position of current field
-	fieldEnd   int             // End position of current field
-	record     []string        // Current record being built
-	headers    []string        // Column headers
-	lineNum    int             // Current line number
-	fieldNum   int             // Current field number
+	buffer     []byte     // Reusable buffer
+	data       []byte     // Current data being parsed
+	pos        int        // Current position in data
+	state      ParseState // Current parsing state
+	fieldStart int        // Start position of current field
+	fieldEnd   int        // End position of current field
+	record     []string   // Current record being built
+	headers    []string   // Column headers
+	lineNum    int        // Current line number
+	fieldNum   int        // Current field number
 }
 
 // NewCSVParser creates a new high-performance CSV parser
@@ -169,79 +169,19 @@ func (p *CSVParser) parseField() error {
 
 		switch p.state {
 		case StateField:
-			if char == byte(p.config.Quote) {
-				if p.fieldStart == p.pos {
-					// Quote at field start
-					inQuotes = true
-					p.fieldStart++
-					p.state = StateQuote
-				} else {
-					// Quote in middle of field (invalid)
-					return fmt.Errorf("unexpected quote at line %d, field %d", p.lineNum, p.fieldNum)
-				}
-			} else if char == byte(p.config.Delimiter) {
-				// Field delimiter
-				p.fieldEnd = p.pos
-				p.state = StateDelimiter
-				p.pos++
-				return nil
-			} else if char == '\n' || char == '\r' {
-				// End of record
-				p.fieldEnd = p.pos
-				p.state = StateNewline
-				p.pos++
-				// Handle \r\n
-				if char == '\r' && p.pos < len(p.data) && p.data[p.pos] == '\n' {
-					p.pos++
-				}
-				return nil
+			if err := p.handleFieldState(char, &inQuotes); err != nil {
+				return err
 			}
-			// Regular character, continue
-
 		case StateQuote:
-			if char == byte(p.config.Escape) {
-				// Escape character
-				p.state = StateQuoteEscape
-				p.pos++
-			} else if char == byte(p.config.Quote) {
-				// End of quoted field
-				inQuotes = false
-				p.fieldEnd = p.pos
-				p.state = StateField
-				p.pos++
-				// Skip whitespace after quote if configured
-				if p.config.TrimSpace {
-					for p.pos < len(p.data) && (p.data[p.pos] == ' ' || p.data[p.pos] == '\t') {
-						p.pos++
-					}
-				}
-				// Check for delimiter or newline
-				if p.pos < len(p.data) {
-					nextChar := p.data[p.pos]
-					if nextChar == byte(p.config.Delimiter) {
-						p.state = StateDelimiter
-						p.pos++
-						return nil
-					} else if nextChar == '\n' || nextChar == '\r' {
-						p.state = StateNewline
-						p.pos++
-						if nextChar == '\r' && p.pos < len(p.data) && p.data[p.pos] == '\n' {
-							p.pos++
-						}
-						return nil
-					}
-				}
-				return nil
+			if err := p.handleQuoteState(char); err != nil {
+				return err
 			}
-			// Regular character in quoted field, continue
-
 		case StateQuoteEscape:
-			// Escaped character, treat as literal
 			p.state = StateQuote
 			p.pos++
+			continue
 		}
 
-		// Check field size limit
 		if p.pos-p.fieldStart > p.config.MaxFieldSize {
 			return fmt.Errorf("field size exceeds maximum at line %d, field %d", p.lineNum, p.fieldNum)
 		}
@@ -249,11 +189,83 @@ func (p *CSVParser) parseField() error {
 		p.pos++
 	}
 
-	// End of data
+	return p.handleEndOfData(inQuotes)
+}
+
+func (p *CSVParser) handleFieldState(char byte, inQuotes *bool) error {
+	if char == byte(p.config.Quote) {
+		if p.fieldStart == p.pos {
+			*inQuotes = true
+			p.fieldStart++
+			p.state = StateQuote
+		} else {
+			return fmt.Errorf("unexpected quote at line %d, field %d", p.lineNum, p.fieldNum)
+		}
+	} else if char == byte(p.config.Delimiter) {
+		p.fieldEnd = p.pos
+		p.state = StateDelimiter
+		p.pos++
+		return nil
+	} else if char == '\n' || char == '\r' {
+		p.fieldEnd = p.pos
+		p.state = StateNewline
+		p.pos++
+		p.handleCRLF(char)
+		return nil
+	}
+	return nil
+}
+
+func (p *CSVParser) handleQuoteState(char byte) error {
+	if char == byte(p.config.Escape) {
+		p.state = StateQuoteEscape
+		p.pos++
+	} else if char == byte(p.config.Quote) {
+		p.fieldEnd = p.pos
+		p.state = StateField
+		p.pos++
+		return p.handleAfterQuote()
+	}
+	return nil
+}
+
+func (p *CSVParser) handleAfterQuote() error {
+	if p.config.TrimSpace {
+		p.skipWhitespace()
+	}
+
+	if p.pos < len(p.data) {
+		nextChar := p.data[p.pos]
+		if nextChar == byte(p.config.Delimiter) {
+			p.state = StateDelimiter
+			p.pos++
+			return nil
+		} else if nextChar == '\n' || nextChar == '\r' {
+			p.state = StateNewline
+			p.pos++
+			p.handleCRLF(nextChar)
+			return nil
+		}
+	}
+	return nil
+}
+
+func (p *CSVParser) skipWhitespace() {
+	for p.pos < len(p.data) && (p.data[p.pos] == ' ' || p.data[p.pos] == '\t') {
+		p.pos++
+	}
+}
+
+func (p *CSVParser) handleCRLF(char byte) {
+	if char == '\r' && p.pos < len(p.data) && p.data[p.pos] == '\n' {
+		p.pos++
+	}
+}
+
+func (p *CSVParser) handleEndOfData(inQuotes bool) error {
 	if inQuotes {
 		return fmt.Errorf("unterminated quoted field at line %d, field %d", p.lineNum, p.fieldNum)
 	}
-
 	p.fieldEnd = p.pos
 	p.state = StateEOF
 	return nil
@@ -341,30 +353,30 @@ func DetectDelimiter(data []byte, sampleSize int) rune {
 	if sampleSize <= 0 || sampleSize > len(data) {
 		sampleSize = len(data)
 	}
-	
+
 	sample := data[:sampleSize]
-	
+
 	// Count potential delimiters in first few lines
 	delimCounts := map[rune]int{
-		',': 0,
-		';': 0,
+		',':  0,
+		';':  0,
 		'\t': 0,
-		'|': 0,
+		'|':  0,
 	}
-	
+
 	lines := 0
 	for i := 0; i < len(sample) && lines < 5; i++ {
 		if sample[i] == '\n' || sample[i] == '\r' {
 			lines++
 		}
-		
+
 		for delim := range delimCounts {
 			if sample[i] == byte(delim) {
 				delimCounts[delim]++
 			}
 		}
 	}
-	
+
 	// Find most frequent delimiter
 	maxCount := 0
 	bestDelim := ','
@@ -374,7 +386,7 @@ func DetectDelimiter(data []byte, sampleSize int) rune {
 			bestDelim = delim
 		}
 	}
-	
+
 	return bestDelim
 }
 
