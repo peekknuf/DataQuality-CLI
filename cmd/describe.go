@@ -31,7 +31,7 @@ func autoDetectSettings() (int, int) {
 		describeWorkers = cpuCount // Start with 1x CPU cores
 	}
 
-	// Detect memory limit (75% of available RAM, capped at 8GB, minimum 512MB)
+	// Detect memory limit (75% of available RAM, capped at 8GB, minimum 1GB)
 	if describeMemoryLimit == 0 {
 		var memStats runtime.MemStats
 		runtime.ReadMemStats(&memStats)
@@ -40,8 +40,8 @@ func autoDetectSettings() (int, int) {
 		if detectedLimit > 8192 {               // Cap at 8GB
 			detectedLimit = 8192
 		}
-		if detectedLimit < 512 { // Minimum 512MB
-			detectedLimit = 512
+		if detectedLimit < 1024 { // Minimum 1GB (bumped from 512MB)
+			detectedLimit = 1024
 		}
 		describeMemoryLimit = detectedLimit
 	}
@@ -308,7 +308,6 @@ func outputResults(results []DescribeResult, totalTime time.Duration) {
 
 	writeSummarySection(&output, results, totalTime)
 	writePerFileAnalysis(&output, results)
-	writeDetailedAnalysis(&output, results)
 
 	// Write to output file or stdout
 	writeOutput(&output)
