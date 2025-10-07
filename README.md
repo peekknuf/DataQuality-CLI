@@ -101,21 +101,91 @@ dataqa describe sales_data.csv --output analysis_report.txt
 dataqa describe large_dataset.csv --sample 100
 ```
 
+## Example Output
+
+```bash
+$ dataqa describe ../data/sales_directory/
+Auto-detected settings: 8 workers, 512MB memory
+Found 41 CSV files
+ Processing files... 100% |████████████████████|
+
+=== DATA QUALITY SUMMARY ===
+Total files processed: 41
+Total processing time: 4.077031959s
+Total rows processed: 6,752,025
+Total columns analyzed: 989
+Data completeness: 99.8%
+Numeric columns: 840, String columns: 149
+
+=== PER-FILE ANALYSIS ===
+File                                           Rows    Columns    Null Rate Process Time Data Quality
+----------------------------------------------------------------------------------------------------
+dim_catalog_pages.csv                           303          9         0.0%         1ms       Good
+dim_call_centers.csv                             12         31        35.5%         5ms       Poor
+fact_catalog_sales_5.csv                     108,124         34         0.0%      1.269s       Good
+fact_web_sales_3.csv                         216,248         34         0.0%      2.199s       Good
+
+=== DETAILED ANALYSIS ===
+File: dim_call_centers.csv
+  Rows: 12 | Columns: 31 | Null Rate: 35.5%
+   11 columns have >10% null values
+
+File: dim_web_pages.csv
+  Rows: 92,265 | Columns: 14 | Null Rate: 14.3%
+   2 columns have >10% null values
+  Key columns:
+    wp_web_page_id: string (92,265 unique values)
+    wp_autogen_flag: string (92,265 unique values)
+```
+
+## Output Format
+
+The tool generates a comprehensive data quality report with three main sections:
+
+### 1. Data Quality Summary
+Aggregate statistics across all processed files:
+- Total files processed and processing time
+- Total rows and columns analyzed
+- Overall data completeness percentage
+- Distribution of numeric vs string columns
+
+### 2. Per-File Analysis
+Detailed table showing metrics for each file:
+- File name (truncated for long paths)
+- Row count and column count
+- Null rate percentage
+- Processing time
+- Data quality rating (Good/Fair/Poor)
+
+### 3. Detailed Analysis
+In-depth analysis for files with quality issues:
+- Files with high null rates (>5%)
+- Large datasets (>100K rows)
+- Files with many columns (>20)
+- Column-level insights and warnings
+- Key columns with interesting characteristics
+
+## Data Quality Ratings
+
+- **Good**: Null rate ≤ 10%
+- **Fair**: Null rate 10-25%
+- **Poor**: Null rate > 25%
+
 ## Column Types Supported
 
-- **Numeric (int/float)**: count, mean, std, min, 25%, 50%, 75%, max
-- **String**: count, unique, top, freq, min, max
-- **Datetime**: count, unique, min, max (auto-detected)
-- **Mixed**: Type consistency analysis with null percentage
+- **Numeric (int/float)**: Automatic detection, mean calculation, standard deviation
+- **String**: Unique value counting, frequency analysis
+- **Mixed Types**: Type consistency analysis with null percentage
 
-## Essential Quality Metrics
+## Quality Metrics
 
-DataQuality-CLI focuses on essential quality metrics that matter most:
+DataQuality-CLI focuses on practical quality metrics:
 
-- **Null Analysis**: Percentage and patterns of missing values
-- **Type Consistency**: Detect mixed data types in columns
-- **Basic Duplicate Detection**: Exact duplicate row counts
-- **Statistical Outliers**: Simple IQR-based outliers for numeric columns
+- **Null Analysis**: Percentage of missing values per column and file
+- **Column Type Detection**: Automatic identification of numeric vs string data
+- **Unique Value Analysis**: Cardinality assessment for string columns
+- **Data Completeness**: Overall dataset completeness scoring
+- **Performance Metrics**: Processing time and file size analysis
 
 ## System Requirements
 
