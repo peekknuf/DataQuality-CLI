@@ -1,7 +1,5 @@
 # DataQuality-CLI
 
-[Quality metrics updated: $(date)]
-
 [![Go Report Card](https://goreportcard.com/badge/github.com/peekknuf/DataQuality-CLI)](https://goreportcard.com/report/github.com/peekknuf/DataQuality-CLI)
 [![License](https://img.shields.io/badge/License-MIT-blue.svg)](https://opensource.org/licenses/MIT)
 
