@@ -1,7 +1,7 @@
 # DataQuality-CLI
 
 
-[![Go Report Card](https://goreportcard.com/badge/github.com/peekknuf/DataQuality-CLI)](https://goreportcard.com/report/github.com/peekknuf/DataQuality-CLI)
+
 [![License](https://img.shields.io/badge/License-MIT-blue.svg)](https://opensource.org/licenses/MIT)
 
 A high-performance CLI tool that provides **comprehensive statistics and analysis** for CSV files with parallel processing capabilities. Optimized for speed and memory efficiency with automatic resource optimization.
