@@ -291,11 +291,13 @@ func (s *WorkStealingScheduler) Stats() SchedulerStats {
 	s.stats.mu.Lock()
 	defer s.stats.mu.Unlock()
 
-	stats := *s.stats
-	stats.TotalRuntime = time.Since(s.stats.StartTime)
-	stats.ActiveWorkers = atomic.LoadInt32(&s.stats.ActiveWorkers)
-
-	return stats
+	return SchedulerStats{
+		TasksSubmitted: s.stats.TasksSubmitted,
+		TasksCompleted: s.stats.TasksCompleted,
+		TasksFailed:    s.stats.TasksFailed,
+		TotalRuntime:   time.Since(s.stats.StartTime),
+		ActiveWorkers:  atomic.LoadInt32(&s.stats.ActiveWorkers),
+	}
 }
 
 // runWorker runs a worker goroutine

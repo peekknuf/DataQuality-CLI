@@ -196,62 +196,95 @@ func (p *FastColumnProcessor) GetStats() ColumnStats {
 		Name:      p.name,
 		Count:     p.count,
 		NullCount: p.nullCount,
+		Type:      p.determineColumnType(),
 	}
 
-	// Determine column type
+	p.calculateNumericStats(&stats)
+	p.calculateStringStats(&stats)
+
+	return stats
+}
+
+func (p *FastColumnProcessor) determineColumnType() string {
 	if p.hasInt && !p.hasFloat && !p.hasString {
-		stats.Type = "int"
-	} else if (p.hasFloat || p.hasInt) && !p.hasString {
-		stats.Type = "float"
-	} else {
-		stats.Type = "string"
+		return "int"
+	}
+	if (p.hasFloat || p.hasInt) && !p.hasString {
+		return "float"
+	}
+	return "string"
+}
+
+func (p *FastColumnProcessor) calculateNumericStats(stats *ColumnStats) {
+	if stats.Type != "int" && stats.Type != "float" {
+		return
 	}
 
-	// Calculate numeric statistics
-	if stats.Type == "int" || stats.Type == "float" {
-		if p.count-p.nullCount > 0 {
-			stats.Mean = p.sum / float64(p.count-p.nullCount)
-			variance := (p.sumSquared / float64(p.count-p.nullCount)) - (stats.Mean * stats.Mean)
-			if variance > 0 {
-				stats.Std = math.Sqrt(variance)
-			}
-		}
-
-		if p.min != math.MaxFloat64 {
-			stats.Min = fmt.Sprintf("%.6g", p.min)
-		}
-		if p.max != -math.MaxFloat64 {
-			stats.Max = fmt.Sprintf("%.6g", p.max)
-		}
-
-		// Calculate quantiles
-		if len(p.sortedVals) > 0 {
-			sort.Float64s(p.sortedVals)
-			stats.Q25 = calculateQuantileFast(p.sortedVals, 0.25)
-			stats.Q50 = calculateQuantileFast(p.sortedVals, 0.50)
-			stats.Q75 = calculateQuantileFast(p.sortedVals, 0.75)
-		}
+	validCount := p.count - p.nullCount
+	if validCount > 0 {
+		stats.Mean = p.sum / float64(validCount)
+		stats.Std = p.calculateStandardDeviation(validCount, stats.Mean)
 	}
 
-	// Calculate string statistics
-	if stats.Type == "string" {
-		stats.Unique = len(p.valueCounts)
-		stats.Top = p.topValue
-		stats.Freq = p.topFreq
+	p.setNumericMinMax(stats)
+	p.calculateQuantiles(stats)
+}
 
-		// For string columns, use first/last alphabetically for min/max display
-		if len(p.valueCounts) > 0 {
-			keys := make([]string, 0, len(p.valueCounts))
-			for k := range p.valueCounts {
-				keys = append(keys, k)
-			}
-			sort.Strings(keys)
+func (p *FastColumnProcessor) calculateStandardDeviation(validCount int, mean float64) float64 {
+	variance := (p.sumSquared / float64(validCount)) - (mean * mean)
+	if variance > 0 {
+		return math.Sqrt(variance)
+	}
+	return 0
+}
+
+func (p *FastColumnProcessor) setNumericMinMax(stats *ColumnStats) {
+	if p.min != math.MaxFloat64 {
+		stats.Min = fmt.Sprintf("%.6g", p.min)
+	}
+	if p.max != -math.MaxFloat64 {
+		stats.Max = fmt.Sprintf("%.6g", p.max)
+	}
+}
+
+func (p *FastColumnProcessor) calculateQuantiles(stats *ColumnStats) {
+	if len(p.sortedVals) > 0 {
+		sort.Float64s(p.sortedVals)
+		stats.Q25 = calculateQuantileFast(p.sortedVals, 0.25)
+		stats.Q50 = calculateQuantileFast(p.sortedVals, 0.50)
+		stats.Q75 = calculateQuantileFast(p.sortedVals, 0.75)
+	}
+}
+
+func (p *FastColumnProcessor) calculateStringStats(stats *ColumnStats) {
+	if stats.Type != "string" {
+		return
+	}
+
+	stats.Unique = len(p.valueCounts)
+	stats.Top = p.topValue
+	stats.Freq = p.topFreq
+
+	p.setStringMinMax(stats)
+}
+
+func (p *FastColumnProcessor) setStringMinMax(stats *ColumnStats) {
+	if len(p.valueCounts) > 0 {
+		keys := p.getSortedKeys()
+		if len(keys) > 0 {
 			stats.Min = keys[0]
 			stats.Max = keys[len(keys)-1]
 		}
 	}
+}
 
-	return stats
+func (p *FastColumnProcessor) getSortedKeys() []string {
+	keys := make([]string, 0, len(p.valueCounts))
+	for k := range p.valueCounts {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	return keys
 }
 
 // calculateQuantileFast calculates the quantile value from a sorted slice

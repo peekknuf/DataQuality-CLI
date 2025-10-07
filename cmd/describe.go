@@ -306,14 +306,31 @@ func convertColumnStats(engineStats []engine.ColumnStats) []ColumnStats {
 func outputResults(results []DescribeResult, totalTime time.Duration) {
 	var output strings.Builder
 
-	// Summary statistics first
+	writeSummarySection(&output, results, totalTime)
+	writePerFileAnalysis(&output, results)
+	writeDetailedAnalysis(&output, results)
+
+	// Write to output file or stdout
+	writeOutput(&output)
+}
+
+func writeSummarySection(output *strings.Builder, results []DescribeResult, totalTime time.Duration) {
 	output.WriteString("=== DATA QUALITY SUMMARY ===\n")
 	output.WriteString(fmt.Sprintf("Total files processed: %d\n", len(results)))
 	output.WriteString(fmt.Sprintf("Total processing time: %v\n", totalTime))
 
-	var totalRows, totalCols int
-	var totalNulls int
-	var numericCols, stringCols int
+	totalRows, totalCols, totalNulls, numericCols, stringCols := calculateAggregateStats(results)
+
+	output.WriteString(fmt.Sprintf("Total rows processed: %d\n", totalRows))
+	output.WriteString(fmt.Sprintf("Total columns analyzed: %d\n", totalCols))
+	completeness := calculateDataCompleteness(totalNulls, totalRows, totalCols, len(results))
+	output.WriteString(fmt.Sprintf("Data completeness: %.1f%%\n", completeness))
+	output.WriteString(fmt.Sprintf("Numeric columns: %d, String columns: %d\n", numericCols, stringCols))
+	output.WriteString("\n")
+}
+
+func calculateAggregateStats(results []DescribeResult) (int, int, int, int, int) {
+	var totalRows, totalCols, totalNulls, numericCols, stringCols int
 
 	for _, result := range results {
 		if result.Error != nil {
@@ -332,14 +349,17 @@ func outputResults(results []DescribeResult, totalTime time.Duration) {
 			}
 		}
 	}
+	return totalRows, totalCols, totalNulls, numericCols, stringCols
+}
 
-	output.WriteString(fmt.Sprintf("Total rows processed: %d\n", totalRows))
-	output.WriteString(fmt.Sprintf("Total columns analyzed: %d\n", totalCols))
-	output.WriteString(fmt.Sprintf("Data completeness: %.1f%%\n", 100.0-(float64(totalNulls)/float64(totalRows*totalCols/len(results))*100.0)))
-	output.WriteString(fmt.Sprintf("Numeric columns: %d, String columns: %d\n", numericCols, stringCols))
-	output.WriteString("\n")
+func calculateDataCompleteness(totalNulls, totalRows, totalCols, fileCount int) float64 {
+	if totalRows*totalCols/fileCount == 0 {
+		return 100.0
+	}
+	return 100.0 - (float64(totalNulls) / float64(totalRows*totalCols/fileCount) * 100.0)
+}
 
-	// Per-file summary (more concise)
+func writePerFileAnalysis(output *strings.Builder, results []DescribeResult) {
 	output.WriteString("=== PER-FILE ANALYSIS ===\n")
 	output.WriteString(fmt.Sprintf("%-40s %10s %10s %12s %12s %10s\n", "File", "Rows", "Columns", "Null Rate", "Process Time", "Data Quality"))
 	output.WriteString(strings.Repeat("-", 100) + "\n")
@@ -349,93 +369,111 @@ func outputResults(results []DescribeResult, totalTime time.Duration) {
 			continue
 		}
 
-		// Extract just filename from path
-		filename := result.Path
-		if lastSlash := strings.LastIndex(filename, "/"); lastSlash >= 0 {
-			filename = filename[lastSlash+1:]
-		}
-
-		// Truncate long filenames
-		if len(filename) > 37 {
-			filename = filename[:34] + "..."
-		}
-
-		quality := "Good"
-		if result.NullPercentage > 10 {
-			quality = "Fair"
-		}
-		if result.NullPercentage > 25 {
-			quality = "Poor"
-		}
+		filename := formatFilename(result.Path)
+		quality := assessDataQuality(result.NullPercentage)
 
 		output.WriteString(fmt.Sprintf("%-40s %10d %10d %11.1f%% %11s %10s\n",
 			filename, result.RowCount, len(result.ColumnStats),
 			result.NullPercentage, result.ProcessingTime.Round(time.Millisecond), quality))
 	}
-
 	output.WriteString("\n")
+}
 
-	// Detailed analysis for files with issues (high null rates, interesting patterns)
+func formatFilename(path string) string {
+	filename := path
+	if lastSlash := strings.LastIndex(filename, "/"); lastSlash >= 0 {
+		filename = filename[lastSlash+1:]
+	}
+
+	if len(filename) > 37 {
+		filename = filename[:34] + "..."
+	}
+	return filename
+}
+
+func assessDataQuality(nullPercentage float64) string {
+	if nullPercentage > 25 {
+		return "Poor"
+	}
+	if nullPercentage > 10 {
+		return "Fair"
+	}
+	return "Good"
+}
+
+func writeDetailedAnalysis(output *strings.Builder, results []DescribeResult) {
 	output.WriteString("=== DETAILED ANALYSIS ===\n")
 	detailedShown := 0
+
 	for _, result := range results {
 		if result.Error != nil || detailedShown >= 3 {
 			continue
 		}
 
-		// Show details for files with interesting characteristics
-		showDetails := result.NullPercentage > 5 || result.RowCount > 100000 || len(result.ColumnStats) > 20
-
-		if showDetails && detailedShown < 3 {
-			filename := result.Path
-			if lastSlash := strings.LastIndex(filename, "/"); lastSlash >= 0 {
-				filename = filename[lastSlash+1:]
-			}
-
-			output.WriteString(fmt.Sprintf("File: %s\n", filename))
-			output.WriteString(fmt.Sprintf("  Rows: %d | Columns: %d | Null Rate: %.1f%%\n",
-				result.RowCount, len(result.ColumnStats), result.NullPercentage))
-
-			// Show key insights
-			var highNullCols, numericColsWithNulls int
-			for _, col := range result.ColumnStats {
-				nullRate := float64(col.NullCount) / float64(col.Count) * 100
-				if nullRate > 10 {
-					highNullCols++
-				}
-				if (col.Type == "int" || col.Type == "float") && col.NullCount > 0 {
-					numericColsWithNulls++
-				}
-			}
-
-			if highNullCols > 0 {
-				output.WriteString(fmt.Sprintf("  ⚠️  %d columns have >10%% null values\n", highNullCols))
-			}
-			if numericColsWithNulls > 0 {
-				output.WriteString(fmt.Sprintf("  ⚠️  %d numeric columns contain nulls\n", numericColsWithNulls))
-			}
-
-			// Show sample of interesting columns
-			interestingCols := 0
-			output.WriteString("  Key columns:\n")
-			for _, col := range result.ColumnStats {
-				if interestingCols >= 3 {
-					break
-				}
-				if col.Type == "float" && col.Mean > 0 {
-					output.WriteString(fmt.Sprintf("    • %s: %s (avg: %.2f)\n", col.Name, col.Type, col.Mean))
-					interestingCols++
-				} else if col.Type == "string" && col.Unique > 100 {
-					output.WriteString(fmt.Sprintf("    • %s: %s (%d unique values)\n", col.Name, col.Type, col.Unique))
-					interestingCols++
-				}
-			}
-			output.WriteString("\n")
+		if shouldShowDetails(result) && detailedShown < 3 {
+			writeFileDetails(output, result)
 			detailedShown++
 		}
 	}
+}
 
-	// Write to output file or stdout
+func shouldShowDetails(result DescribeResult) bool {
+	return result.NullPercentage > 5 || result.RowCount > 100000 || len(result.ColumnStats) > 20
+}
+
+func writeFileDetails(output *strings.Builder, result DescribeResult) {
+	filename := formatFilename(result.Path)
+	output.WriteString(fmt.Sprintf("File: %s\n", filename))
+	output.WriteString(fmt.Sprintf("  Rows: %d | Columns: %d | Null Rate: %.1f%%\n",
+		result.RowCount, len(result.ColumnStats), result.NullPercentage))
+
+	highNullCols, numericColsWithNulls := analyzeColumnIssues(result)
+	writeColumnInsights(output, highNullCols, numericColsWithNulls)
+	writeKeyColumns(output, result)
+	output.WriteString("\n")
+}
+
+func analyzeColumnIssues(result DescribeResult) (int, int) {
+	var highNullCols, numericColsWithNulls int
+	for _, col := range result.ColumnStats {
+		nullRate := float64(col.NullCount) / float64(col.Count) * 100
+		if nullRate > 10 {
+			highNullCols++
+		}
+		if (col.Type == "int" || col.Type == "float") && col.NullCount > 0 {
+			numericColsWithNulls++
+		}
+	}
+	return highNullCols, numericColsWithNulls
+}
+
+func writeColumnInsights(output *strings.Builder, highNullCols, numericColsWithNulls int) {
+	if highNullCols > 0 {
+		output.WriteString(fmt.Sprintf("  ⚠️  %d columns have >10%% null values\n", highNullCols))
+	}
+	if numericColsWithNulls > 0 {
+		output.WriteString(fmt.Sprintf("  ⚠️  %d numeric columns contain nulls\n", numericColsWithNulls))
+	}
+}
+
+func writeKeyColumns(output *strings.Builder, result DescribeResult) {
+	interestingCols := 0
+	output.WriteString("  Key columns:\n")
+	for _, col := range result.ColumnStats {
+		if interestingCols >= 3 {
+			break
+		}
+		if col.Type == "float" && col.Mean > 0 {
+			output.WriteString(fmt.Sprintf("    • %s: %s (avg: %.2f)\n", col.Name, col.Type, col.Mean))
+			interestingCols++
+		} else if col.Type == "string" && col.Unique > 100 {
+			output.WriteString(fmt.Sprintf("    • %s: %s (%d unique values)\n", col.Name, col.Type, col.Unique))
+			interestingCols++
+		}
+	}
+}
+
+func writeOutput(output *strings.Builder) {
 	if outputFile != "" {
 		err := os.WriteFile(outputFile, []byte(output.String()), 0644)
 		if err != nil {

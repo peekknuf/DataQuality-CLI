@@ -2,6 +2,7 @@ package io
 
 import (
 	"fmt"
+	"io"
 	"os"
 	"runtime"
 	"sync"
@@ -170,13 +171,26 @@ func (r *MMapReader) readRegularChunk() ([]byte, error) {
 }
 
 // Seek moves the read offset to the specified position
-func (r *MMapReader) Seek(offset int64) error {
-	if offset < 0 || offset > r.size {
-		return fmt.Errorf("invalid offset: %d", offset)
+func (r *MMapReader) Seek(offset int64, whence int) (int64, error) {
+	var newOffset int64
+
+	switch whence {
+	case io.SeekStart:
+		newOffset = offset
+	case io.SeekCurrent:
+		newOffset = r.offset + offset
+	case io.SeekEnd:
+		newOffset = r.size + offset
+	default:
+		return r.offset, fmt.Errorf("invalid whence: %d", whence)
 	}
 
-	r.offset = offset
-	return nil
+	if newOffset < 0 || newOffset > r.size {
+		return r.offset, fmt.Errorf("invalid offset: %d", newOffset)
+	}
+
+	r.offset = newOffset
+	return r.offset, nil
 }
 
 // Size returns the total size of the file
